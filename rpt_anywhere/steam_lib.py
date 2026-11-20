@@ -25,6 +25,7 @@ TOOL_APPIDS = {
     1070560,  # Steam Linux Runtime 1.0 (scout)
     1391110,  # Steam Linux Runtime 2.0 (soldier)
     1628350,  # Steam Linux Runtime 3.0 (sniper)
+    4183110,  # Steam Linux Runtime 4.0
     1493710,  # Proton Experimental
     2180100,  # Proton Hotfix
     1826330,  # Proton EasyAntiCheat Runtime
@@ -245,14 +246,29 @@ class Steam:
         return tools
 
     def runtime_entry_point(self, runtime_appid: int | None) -> Path | None:
-        names = {1628350: "SteamLinuxRuntime_sniper", 1391110: "SteamLinuxRuntime_soldier"}
-        name = names.get(runtime_appid or 0)
-        if not name:
+        """Entry point of the Steam Linux Runtime a compatibility tool requires.
+        Looked up via the runtime's appmanifest, so new runtimes (e.g. 4183110,
+        used by Proton-CachyOS "slr" builds) are found as well."""
+        if not runtime_appid:
             return None
+        dirs: list[str] = []
         for lib in self.libraries():
-            ep = lib / "common" / name / "_v2-entry-point"
-            if ep.exists():
-                return ep
+            acf = lib / f"appmanifest_{runtime_appid}.acf"
+            if acf.exists():
+                try:
+                    d = iget(iget(vdf.load(acf), "AppState", {}), "installdir", "")
+                    if d:
+                        dirs.append(str(lib / "common" / d))
+                except Exception:
+                    pass
+        names = {1628350: "SteamLinuxRuntime_sniper", 1391110: "SteamLinuxRuntime_soldier",
+                 4183110: "SteamLinuxRuntime_4"}
+        if runtime_appid in names:
+            dirs += [str(lib / "common" / names[runtime_appid]) for lib in self.libraries()]
+        for d in dirs:
+            ep = resolve_ci(d, "_v2-entry-point") if Path(d).is_dir() else None
+            if ep and Path(ep).exists():
+                return Path(ep)
         return None
 
     def compat_tool_for(self, appid: int) -> str | None:

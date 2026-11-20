@@ -58,6 +58,11 @@ def diagnose(cfg) -> int:
         bk = list(lc.parent.glob("localconfig.vdf.rpta-backup-*"))
         print(_('localconfig: {name}  beschädigt={v1}  RPT-Sicherungen={v2}').format(name=lc.parent.parent.name, v1=localconfig_damaged(lc), v2=len(bk)))
     print(_('Proton:'), ", ".join(t.name for t in s.proton_tools()) or "keins")
+    for t in s.proton_tools():
+        if t.runtime_appid:
+            print(_('  {name}: Steam Linux Runtime {appid} → {ep}').format(
+                name=t.name, appid=t.runtime_appid,
+                ep=s.runtime_entry_point(t.runtime_appid) or _('NICHT GEFUNDEN')))
     print(_('Donor: {donor_name} ({donor_appid}) – Startoption: {v2}').format(donor_name=cfg.donor_name, donor_appid=cfg.donor_appid, v2=s.get_launch_options(cfg.donor_appid) if cfg.donor_appid else '-'))
     print(_('libsteam_api: {v0}  | gefunden: {v1}').format(v0=cfg.libsteam_api or '-', v1=[str(p) for p in s.find_libsteam_api()[:2]]))
     print(_('\nSpiele:'), flush=True)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.3] – 2026-11-20
+
+### Fixed
+- Windows games via Proton builds that need **Steam Linux Runtime 4.0** (AppID 4183110, e.g. Proton-CachyOS “slr” builds) were started without that runtime. Guests then only saw “Please wait” instead of the game. The runtime is now located via its app manifest in every Steam library, so new runtimes are found without a hard-coded name.
+
+### Added
+- `--diagnose` lists the Steam Linux Runtime each Proton version needs and whether it was found.
+
 ## [0.4.2] – 2026-11-20
 
 ### Fixed

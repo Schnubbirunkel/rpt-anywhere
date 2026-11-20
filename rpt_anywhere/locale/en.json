@@ -347,5 +347,6 @@
  "Overlay fürs Streaming: LD_PRELOAD={pre}, Vulkan-Layer={vk}, SteamGameId={gid}": "Overlay for streaming: LD_PRELOAD={pre}, Vulkan layer={vk}, SteamGameId={gid}",
  "ja": "yes",
  "nein": "no",
- "{tool} braucht die Steam Linux Runtime ({appid}), die nicht gefunden wurde – Proton startet ohne sie.": "{tool} needs the Steam Linux Runtime ({appid}), which was not found – Proton starts without it."
+ "{tool} braucht die Steam Linux Runtime ({appid}), die nicht gefunden wurde – Proton startet ohne sie.": "{tool} needs the Steam Linux Runtime ({appid}), which was not found – Proton starts without it.",
+ "  {name}: Steam Linux Runtime {appid} → {ep}": "  {name}: Steam Linux Runtime {appid} → {ep}"
 }
