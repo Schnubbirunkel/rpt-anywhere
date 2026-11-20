@@ -249,6 +249,7 @@ class Agent:
             elif kind == "session_connected":
                 log(_("Gast verbunden (Session {sid}), Spiel läuft: {running}").format(
                     sid=payload, running=_("ja") if self.game_running() else _("nein")))
+                self.log_processes(_("Gast verbunden"))
                 self.refresh_sessions()
                 self.event("joined", _('Ein Mitspieler ist beigetreten 🎮'))
             elif kind == "session_disconnected":
@@ -301,6 +302,22 @@ class Agent:
             if self.proc and pid == self.proc.pid and self.proc.returncode is None:
                 self.proc.returncode = os.waitstatus_to_exitcode(status) \
                     if hasattr(os, "waitstatus_to_exitcode") else status
+
+    def log_processes(self, why: str) -> None:
+        """Write the game's process tree to the log (which process has which program)."""
+        rows = []
+        for pid, comm in descendants(os.getpid()):
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                    args = [a.decode(errors="replace") for a in fh.read().split(b"\0") if a]
+            except OSError:
+                args = []
+            exe = next((a for a in args if a.lower().endswith((".exe", ".x86_64"))), "")
+            if not exe and args:
+                exe = args[0]
+            exe = exe.replace("\\", "/").rsplit("/", 1)[-1]
+            rows.append(f"{pid} {comm}" + (f" [{exe}]" if exe and exe != comm else ""))
+        log(_("Prozesse ({why}): {procs}").format(why=why, procs=", ".join(rows) or "-"))
 
     def real_processes(self) -> list[tuple[int, str]]:
         """Descendants of the agent that are not Wine/Proton/runtime helpers."""
@@ -451,6 +468,10 @@ class Agent:
             if tick % 5 == 0:
                 self.process_requests()
             if tick % 10 == 0:
+                if (self.running and not self.running.get("procs_logged")
+                        and time.time() - self.running.get("started", 0) > 20):
+                    self.running["procs_logged"] = True
+                    self.log_processes(_("20 s nach Spielstart"))
                 if (DONOR_DIR / "stop").exists():
                     self.handle({"cmd": "end_session"})
                     break
