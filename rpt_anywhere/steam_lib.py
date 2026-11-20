@@ -32,6 +32,37 @@ TOOL_APPIDS = {
     1161040,  # Proton BattlEye Runtime
     250820,   # SteamVR
 }
+def _names_file() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return Path(base) / "rpt-anywhere" / "app-names.json"
+
+
+def _load_names() -> dict:
+    import json
+    try:
+        return json.loads(_names_file().read_text())
+    except Exception:
+        return {}
+
+
+def _save_names(names: dict) -> None:
+    import json
+    try:
+        f = _names_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(names, ensure_ascii=False, indent=0, sort_keys=True))
+        tmp.replace(f)
+    except OSError:
+        pass
+
+
+def _placeholder(name: str, appid: int) -> bool:
+    """Names Steam writes when it lacks app data: "appid_123", "App 123", ""."""
+    n = (name or "").strip().lower()
+    return not n or n in (f"appid_{appid}", f"app {appid}", str(appid))
+
+
 _TOOL_NAME = re.compile(r"^(proton|steam linux runtime|steamworks common)", re.I)
 
 
@@ -150,11 +181,27 @@ class Steam:
                 if not appid or appid in TOOL_APPIDS or _TOOL_NAME.match(name):
                     continue
                 apps[appid] = SteamApp(appid, name, iget(st, "installdir", ""), lib)
+        names = _load_names()
+        learned = False
+        for appid, app in apps.items():         # Steam writes placeholders like "appid_1330890"
+            if not _placeholder(app.name, appid):
+                if names.get(str(appid)) != app.name:
+                    names[str(appid)] = app.name
+                    learned = True
+            elif names.get(str(appid)):
+                app.name = names[str(appid)]
         if with_details and apps:
             info = self.appinfo(set(apps))
             for appid, app in list(apps.items()):
                 kv = iget(info.get(appid, {}), "appinfo", {})
                 common = iget(kv, "common", {})
+                real = str(iget(common, "name", "") or "").strip()
+                if real and not _placeholder(real, appid):
+                    if names.get(str(appid)) != real:
+                        names[str(appid)] = real
+                        learned = True
+                    if _placeholder(app.name, appid):
+                        app.name = real
                 if common:
                     app.app_type = str(iget(common, "type", "")).lower()
                     cats = iget(common, "category", {}) or {}
@@ -165,6 +212,8 @@ class Steam:
                 launch = ipath(kv, "config", "launch", default={}) or {}
                 app.launch = [v for _k, v in sorted(launch.items(), key=lambda kv_: _intkey(kv_[0]))
                               if isinstance(v, dict)]
+        if learned:
+            _save_names(names)
         return sorted(apps.values(), key=lambda a: a.name.lower())
 
     def appinfo_files(self) -> list[Path]:

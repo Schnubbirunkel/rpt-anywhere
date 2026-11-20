@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.10] – 2026-11-20
+
+### Fixed
+- Games showed up as `appid_1234567` in the library. Newer Steam clients write such placeholders into their app manifests; the app now uses the real name from Steam's app info and remembers names, so they stay correct even when Steam's data is incomplete.
+- appinfo v42 shards whose index ends with a few padding bytes (e.g. 26 apps, 2082 bytes) are read instead of being reported as unreadable.
+
+### Added
+- Warning when a game signs in to Steam with its own AppID instead of the donor's (Steam then shows that game in your friends list). Such games cannot be streamed through a donor – guests only see “Please wait”.
+
 ## [0.4.9] – 2026-11-20
 
 ### Fixed

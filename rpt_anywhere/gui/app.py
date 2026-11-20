@@ -650,6 +650,9 @@ class MainWindow(QMainWindow):
                 self.toast(_('Steam hat die Einladung abgelehnt.'), "err")
             elif k == "error":
                 self.toast(e["text"], "err")
+            elif k == "warn":
+                log.warning("%s", e["text"])
+                self.toast(e["text"], "warn")
         if self._guest_requested and time.time() - self._guest_requested > 15:
             self._guest_requested = 0.0
             log.warning(_('Kein Gast-Link nach 15 s erhalten'))

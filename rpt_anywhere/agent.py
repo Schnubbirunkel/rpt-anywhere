@@ -468,6 +468,15 @@ class Agent:
             if tick % 5 == 0:
                 self.process_requests()
             if tick % 10 == 0:
+                if self.sw and self.running and not self.running.get("appid_warned") \
+                        and time.time() - self.running.get("started", 0) > 15:
+                    other = self.sw.playing_appid()
+                    if other and self.appid and other != int(self.appid):
+                        self.running["appid_warned"] = True
+                        msg = _("»{name}« hat sich bei Steam mit eigener AppID {other} angemeldet (statt {donor}). Steam ordnet sein Bild deshalb nicht dem Donor zu – Gäste sehen nur „Bitte warten“. Mit dem Donor-Weg lässt sich dieses Spiel nicht streamen.").format(
+                            name=self.running.get("name", "?"), other=other, donor=self.appid)
+                        log(msg)
+                        self.event("warn", msg)
                 if (self.running and not self.running.get("procs_logged")
                         and time.time() - self.running.get("started", 0) > 20):
                     self.running["procs_logged"] = True

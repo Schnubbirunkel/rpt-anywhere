@@ -242,10 +242,13 @@ def _read_appinfo_v42(mm, wanted: set[int] | None) -> dict[int, dict]:
     data_off = strtab_off + strtab_size
     if count == 0:
         return {}
-    if index_size % count or data_off + data_size > len(mm):
+    # the index may end with a few padding bytes (seen: 26 apps, 2082 bytes = 26 × 80 + 2)
+    if index_size < count * 12 or data_off + data_size > len(mm):
         raise ValueError(f"appinfo v42: unexpected header (apps={count}, index={index_size}, "
                          f"strings={nstrings}/{strtab_size}, data={data_size}, file={len(mm)})")
     rec_size = index_size // count
+    if rec_size > 80 and index_size >= count * 80 and index_size - count * 80 < count:
+        rec_size = 80
     strings: list[str] = []
     p = strtab_off
     for _i in range(nstrings):

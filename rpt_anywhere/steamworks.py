@@ -301,6 +301,17 @@ class Steamworks:
     def my_steamid(self) -> int:
         return int(self._get_steamid(self.user))
 
+    def playing_appid(self, steamid: int | None = None) -> int:
+        """AppID Steam shows as "playing" for *steamid* (default: the signed-in user); 0 = none/unknown."""
+        gi = FriendGameInfo()
+        try:
+            sid = steamid or self.my_steamid()
+            if self._friend_game(self.friends, sid, C.byref(gi)):
+                return gi.game_id & 0xFFFFFF
+        except Exception:
+            pass
+        return 0
+
     def my_name(self) -> str:
         return (self._persona(self.friends) or b"").decode("utf-8", "replace")
 
