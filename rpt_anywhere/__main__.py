@@ -26,6 +26,10 @@ def parse_args(argv):
                     help=_('Steam-Erkennung prüfen (Bibliotheken, Startdateien, Proton, Donor)'))
     ap.add_argument("--print-launch-option", action="store_true",
                     help=_('Startoption für das Donor-Spiel ausgeben'))
+    ap.add_argument("--guest-link", metavar="APPID", type=int,
+                    help=_('Gast-Link für ein Spiel erzeugen, das Steam selbst gestartet hat'))
+    ap.add_argument("--invite", metavar="STEAMID", type=int, default=0,
+                    help=_('mit --guest-link: stattdessen diesen Freund einladen'))
     ap.add_argument("rest", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     return ap.parse_args(argv)
 
@@ -118,6 +122,9 @@ def main(argv=None) -> int:
         return 0
     if args.diagnose:
         return diagnose(cfg)
+    if args.guest_link:
+        from .attach import attach
+        return attach(args.guest_link, args.invite)
     if args.print_launch_option:
         from .gui.pages import donor_launch_options
         print(donor_launch_options())

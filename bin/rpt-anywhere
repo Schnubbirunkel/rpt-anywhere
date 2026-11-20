@@ -139,7 +139,7 @@ args=()
 for a in "$@"; do [ "$a" = "--gui" ] || args+=("$a"); done
 
 case " $* " in
-    *" --list "*|*" --print-launch-option "*|*" --diagnose "*|*" --reset "*|*" --repair-steam-config "*|*" --version "*|*" -h "*|*" --help "*)
+    *" --list "*|*" --print-launch-option "*|*" --diagnose "*|*" --guest-link "*|*" --reset "*|*" --repair-steam-config "*|*" --version "*|*" -h "*|*" --help "*)
         exec "$PY" -m rpt_anywhere "${args[@]}";;
 esac
 mkdir -p "$CACHE"

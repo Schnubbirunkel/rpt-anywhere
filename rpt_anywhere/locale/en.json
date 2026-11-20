@@ -357,5 +357,12 @@
  "Variablen (z. B. WINEDLLOVERRIDES für Mods/OptiScaler), Programme vor %command% und Argumente danach werden wie in Steam angewendet.": "Variables (e.g. WINEDLLOVERRIDES for mods/OptiScaler), programs before %command% and arguments after it are applied just like in Steam.",
  "Steam-Startoptionen des Spiels übernehmen": "Apply the game's Steam launch options",
  "Steam-Startoptionen: {opts}": "Steam launch options: {opts}",
- "(keine gesetzt)": "(none set)"
+ "(keine gesetzt)": "(none set)",
+ "Gast-Link für ein Spiel erzeugen, das Steam selbst gestartet hat": "create a guest link for a game Steam itself has started",
+ "mit --guest-link: stattdessen diesen Freund einladen": "with --guest-link: invite this friend instead",
+ "Angemeldet als {me} für AppID {appid} ({lib})": "Signed in as {me} for AppID {appid} ({lib})",
+ "Kein Gast-Link von Steam nach {s} s – öffne Steams Remote-Play-Together-Fenster.": "No guest link from Steam after {s} s – opening Steam's Remote Play Together window.",
+ "Steam hat die Anfrage abgelehnt – läuft das Spiel mit AppID {appid}?": "Steam rejected the request – is the game with AppID {appid} running?",
+ "Einladung an {sid} gesendet.": "Invite sent to {sid}.",
+ "Gast-Link: {link}": "Guest link: {link}"
 }

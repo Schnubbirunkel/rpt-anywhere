@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.8] – 2026-11-20
+
+### Added
+- `rpt-anywhere --guest-link APPID` (optionally `--invite STEAMID`): creates a Remote Play Together guest link or invite for a game that Steam itself has started, using that game's AppID (like RemotePlayWhatever). For games that register with Steam under their own, hard-coded AppID and therefore show guests only “Please wait” when started through a donor.
+
 ## [0.4.7] – 2026-11-20
 
 ### Added
