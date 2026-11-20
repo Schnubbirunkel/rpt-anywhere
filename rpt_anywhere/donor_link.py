@@ -82,6 +82,10 @@ class DonorLink:
         t = _read_int(DONOR_DIR / "stub.alive")
         return bool(t) and _now() - t < 6 and (DONOR_DIR / "env").exists()
 
+    def fallback(self) -> bool:
+        """The placeholder runs without agent (no python3 or the agent failed)."""
+        return (DONOR_DIR / "fallback").exists()
+
     def refresh(self) -> bool:
         """Re-read the donor environment. Returns True while a donor session is live."""
         if not self.alive():
@@ -199,7 +203,7 @@ def reset(include_gui: bool = False, wait: float = 3.0) -> list[str]:
                 time.sleep(1.0)
             except (ProcessLookupError, PermissionError):
                 break
-    for name in ("state.json", "env", "pid", "stub.alive", "stop", "host.alive"):
+    for name in ("state.json", "env", "pid", "stub.alive", "stop", "fallback", "host.alive"):
         try:
             (DONOR_DIR / name).unlink()
         except OSError:

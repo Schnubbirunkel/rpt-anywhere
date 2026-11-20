@@ -339,5 +339,13 @@
  "Remote-Play-Together-Fenster von Steam geöffnet: {ok}": "Opened Steam's Remote Play Together window: {ok}",
  "Kein Gast-Link von Steam nach 10 s (empfangene Callbacks: {seen})": "No guest link from Steam after 10 s (callbacks received: {seen})",
  "Subreaper aktiv: {ok}": "Subreaper active: {ok}",
- "App beendet, nur noch Hintergrundprozesse – räume auf": "App closed, only background processes left – cleaning up"
+ "App beendet, nur noch Hintergrundprozesse – räume auf": "App closed, only background processes left – cleaning up",
+ "FEHLT": "MISSING",
+ "Gast getrennt (Session {sid})": "Guest disconnected (session {sid})",
+ "Gast verbunden (Session {sid}), Spiel läuft: {running}": "Guest connected (session {sid}), game running: {running}",
+ "Gast-Link angefordert, bevor ein Spiel läuft – der Gast sieht dann nur „Bitte warten“": "Guest link requested before a game is running – the guest will only see “Please wait”",
+ "Overlay fürs Streaming: LD_PRELOAD={pre}, Vulkan-Layer={vk}, SteamGameId={gid}": "Overlay for streaming: LD_PRELOAD={pre}, Vulkan layer={vk}, SteamGameId={gid}",
+ "ja": "yes",
+ "nein": "no",
+ "{tool} braucht die Steam Linux Runtime ({appid}), die nicht gefunden wurde – Proton startet ohne sie.": "{tool} needs the Steam Linux Runtime ({appid}), which was not found – Proton starts without it."
 }

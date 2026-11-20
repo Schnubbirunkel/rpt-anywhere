@@ -451,6 +451,8 @@ class MainWindow(QMainWindow):
             self.host_game = None
             log.info(_('Spiel an Donor-Agent übergeben: %s | %s | cwd=%s'), g.name,
                      " ".join(p.argv), p.cwd)
+            if p.note:
+                log.warning("%s: %s", g.name, p.note)
         else:
             try:
                 self.host_game = RunningGame(g, p, logfile)
@@ -560,7 +562,7 @@ class MainWindow(QMainWindow):
         except OSError:
             pass
         st = self.link.agent_state()
-        mode = "agent" if st else ("stub" if self.link.refresh() else None)
+        mode = "agent" if st else ("stub" if self.link.refresh() and self.link.fallback() else None)
         self._steam_check = getattr(self, "_steam_check", 0) + 1
         if mode and self._steam_check % 5 == 0 and self.steam.ok and not self.steam.is_running():
             self._steam_dead = getattr(self, "_steam_dead", 0) + 1
@@ -691,6 +693,9 @@ class MainWindow(QMainWindow):
     def guest_link(self):
         if not self.agent:
             return
+        if not self.game_is_running():
+            self.toast(_('Tipp: Starte zuerst ein Spiel – sonst sehen Freunde nur einen leeren Stream.'), "warn")
+            log.warning(_('Gast-Link angefordert, bevor ein Spiel läuft – der Gast sieht dann nur „Bitte warten“'))
         self._guest_requested = time.time()
         self.link.send("guest")
         log.info(_('Gast-Link angefordert'))

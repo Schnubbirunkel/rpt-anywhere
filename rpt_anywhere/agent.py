@@ -247,9 +247,12 @@ class Agent:
                 log(_('Gast-Link: {guest_link}').format(guest_link=self.guest_link))
                 self.event("guest_link", self.guest_link)
             elif kind == "session_connected":
+                log(_("Gast verbunden (Session {sid}), Spiel läuft: {running}").format(
+                    sid=payload, running=_("ja") if self.game_running() else _("nein")))
                 self.refresh_sessions()
                 self.event("joined", _('Ein Mitspieler ist beigetreten 🎮'))
             elif kind == "session_disconnected":
+                log(_("Gast getrennt (Session {sid})").format(sid=payload))
                 self.refresh_sessions()
                 self.event("left", _('Ein Mitspieler hat die Session verlassen'))
 
@@ -279,6 +282,10 @@ class Agent:
                         "pid": self.proc.pid, "started": time.time(),
                         "summary": req.get("summary", "")}
         log(_('Spiel gestartet: {v0} pid={pid} argv={v2}').format(v0=req.get('name'), pid=self.proc.pid, v2=req['argv']))
+        log(_("Overlay fürs Streaming: LD_PRELOAD={pre}, Vulkan-Layer={vk}, SteamGameId={gid}").format(
+            pre=_("ja") if "gameoverlayrenderer" in env.get("LD_PRELOAD", "") else _("FEHLT"),
+            vk=env.get("ENABLE_VK_LAYER_VALVE_steam_overlay_1", _("FEHLT")),
+            gid=env.get("SteamGameId", "-")))
 
     def reap(self) -> None:
         """Collect exit status of re-parented children (avoid zombies)."""

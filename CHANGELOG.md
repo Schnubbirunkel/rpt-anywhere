@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.2] – 2026-11-20
+
+### Fixed
+- Logs tab: the source selector, the auto-scroll checkbox and the buttons no longer overlap in narrow windows. Buttons moved next to the heading, auto-scroll into the footer.
+- No more false “Donor connected without agent (fallback mode)” warning while the agent is still loading the Steam API. The placeholder now marks fallback mode explicitly.
+
+### Added
+- Warning when a guest link is created before a game is running – the guest would only see “Please wait”.
+- The donor log now records when guests connect/disconnect (and whether a game was running), and whether Steam's overlay hooks (LD_PRELOAD, Vulkan layer, SteamGameId) reach the started game.
+- Warning when a Proton version needs the Steam Linux Runtime but it was not found.
+
 ## [0.4.1] – 2026-11-20
 
 ### Fixed

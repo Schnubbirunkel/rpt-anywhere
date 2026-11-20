@@ -700,6 +700,12 @@ def _open_dir(p: Path):
 
 
 # =========================================================================== #
+def _short(path) -> str:
+    home = os.path.expanduser("~")
+    p = str(path)
+    return "~" + p[len(home):] if home and p.startswith(home + "/") else p
+
+
 class LogsPage(QWidget):
     """Live view of all log files (tail -f style)."""
     reset = Signal()
@@ -718,19 +724,8 @@ class LogsPage(QWidget):
         tcol.setSpacing(2)
         tcol.addWidget(label(_('Logs'), "H1"))
         tcol.addWidget(label(_('Wird live aktualisiert. Hilfreich, wenn etwas nicht startet.'),
-                             "Muted"))
+                             "Muted", wrap=True))
         top.addLayout(tcol, 1)
-        v.addLayout(top)
-
-        bar = QHBoxLayout()
-        self.source = QComboBox()
-        self.source.setMinimumWidth(340)
-        self.source.currentIndexChanged.connect(self._switch)
-        bar.addWidget(self.source)
-        self.follow = QCheckBox(_('Automatisch mitscrollen'))
-        self.follow.setChecked(True)
-        bar.addWidget(self.follow)
-        bar.addStretch(1)
         cp = QPushButton(_('Kopieren'))
         cp.clicked.connect(lambda: QGuiApplication.clipboard().setText(self.view.toPlainText()))
         clr = QPushButton(_('Leeren'))
@@ -743,8 +738,14 @@ class LogsPage(QWidget):
         nb.setToolTip(_('Session, Agent im Steam-Prozess und letztes Spiel beenden'))
         nb.clicked.connect(self.reset)
         for b in (cp, clr, op, nb):
-            bar.addWidget(b)
-        v.addLayout(bar)
+            top.addWidget(b, 0, Qt.AlignBottom)
+        v.addLayout(top)
+
+        self.source = QComboBox()
+        self.source.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.source.setMinimumContentsLength(18)
+        self.source.currentIndexChanged.connect(self._switch)
+        v.addWidget(self.source)
 
         self.view = QPlainTextEdit()
         self.view.setReadOnly(True)
@@ -752,8 +753,14 @@ class LogsPage(QWidget):
         self.view.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.view.setMaximumBlockCount(5000)
         v.addWidget(self.view, 1)
+        foot = QHBoxLayout()
         self.info = label("", "Small")
-        v.addWidget(self.info)
+        self.info.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        foot.addWidget(self.info, 1)
+        self.follow = QCheckBox(_('Automatisch mitscrollen'))
+        self.follow.setChecked(True)
+        foot.addWidget(self.follow)
+        v.addLayout(foot)
 
         self.path: Path | None = None
         self.pos = 0
@@ -802,7 +809,7 @@ class LogsPage(QWidget):
         try:
             size = self.path.stat().st_size
         except OSError:
-            self.info.setText(_('{path}  –  (noch) nicht vorhanden').format(path=self.path))
+            self.info.setText(_('{path}  –  (noch) nicht vorhanden').format(path=_short(self.path)))
             return
         if size < self.pos:  # truncated / rewritten
             self.pos = 0
@@ -822,7 +829,7 @@ class LogsPage(QWidget):
             if self.follow.isChecked() or at_end:
                 sb.setValue(sb.maximum())
         import time as _t
-        self.info.setText(_('{path}  ·  {v1:.1f} KB  ·  aktualisiert {v2}').format(path=self.path, v1=size / 1024, v2=_t.strftime('%H:%M:%S')))
+        self.info.setText(_('{path}  ·  {v1:.1f} KB  ·  aktualisiert {v2}').format(path=_short(self.path), v1=size / 1024, v2=_t.strftime('%H:%M:%S')))
 
     def _clear(self):
         if self.path and self.path.exists():

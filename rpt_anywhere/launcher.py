@@ -180,8 +180,10 @@ def plan(game: Game, steam: Steam, default_proton: str = "", donor: dict | None 
         if entry:
             argv = [str(entry), "--verb=waitforexitandrun", "--",
                     str(tool.script), "waitforexitandrun", exe, *args]
-        else:
-            argv = [str(tool.script), "waitforexitandrun", exe, *args]
+            return mk(argv, summary)
+        argv = [str(tool.script), "waitforexitandrun", exe, *args]
+        if tool.runtime_appid:
+            return mk(argv, summary, note=_('{tool} braucht die Steam Linux Runtime ({appid}), die nicht gefunden wurde – Proton startet ohne sie.').format(tool=tool.name, appid=tool.runtime_appid))
         return mk(argv, summary)
 
     raise LaunchError(_('Unbekannter Runner: {runner}').format(runner=runner))

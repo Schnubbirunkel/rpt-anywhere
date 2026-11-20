@@ -40,7 +40,7 @@ if [ "$is_donor" = 1 ]; then
         echo "args: $*"
     } >"$LOG"
 
-    rm -f "$DONOR/stop"
+    rm -f "$DONOR/stop" "$DONOR/fallback"
     env -0 >"$DONOR/env.tmp" && mv -f "$DONOR/env.tmp" "$DONOR/env"
     echo "$$" >"$DONOR/pid"
     now >"$DONOR/stub.alive"
@@ -102,6 +102,7 @@ from rpt_anywhere.agent import main; sys.exit(main())' "$APPDIR"
         echo "no python3 – fallback mode without agent" >>"$LOG"
     fi
 
+    : >"$DONOR/fallback"   # tells the app: no agent, games start on the host
     seen=0
     started="$(now)"
     while :; do
@@ -116,7 +117,7 @@ from rpt_anywhere.agent import main; sys.exit(main())' "$APPDIR"
         fi
         sleep 1
     done
-    rm -f "$DONOR/env" "$DONOR/pid" "$DONOR/stub.alive" "$DONOR/stop"
+    rm -f "$DONOR/env" "$DONOR/pid" "$DONOR/stub.alive" "$DONOR/stop" "$DONOR/fallback"
     exit 0
 fi
 
