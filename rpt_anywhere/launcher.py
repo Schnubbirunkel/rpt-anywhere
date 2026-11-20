@@ -141,7 +141,11 @@ def plan(game: Game, steam: Steam, default_proton: str = "", donor: dict | None 
             if opts and "rpt-anywhere" not in opts:
                 s_env, s_wrap, s_args = parse_launch_options(opts)
                 for k, v in s_env.items():
-                    extra.setdefault(k, v)          # the game's own env field wins
+                    if k == "WINEDLLOVERRIDES" and extra.get(k):
+                        # combine – entries from the game's env field come last and win
+                        extra[k] = f"{v};{extra[k]}"
+                    else:
+                        extra.setdefault(k, v)      # the game's own env field wins
                 wrappers = s_wrap
                 args = args + s_args
                 adopted = opts

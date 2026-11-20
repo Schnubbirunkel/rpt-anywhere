@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.9] – 2026-11-20
+
+### Fixed
+- `WINEDLLOVERRIDES` from the game's Steam launch options (e.g. `winhttp=n,b` for BepInEx) and from the edit dialog's environment field are now combined instead of one replacing the other.
+
 ## [0.4.8] – 2026-11-20
 
 ### Added
