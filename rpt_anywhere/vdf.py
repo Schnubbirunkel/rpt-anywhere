@@ -243,7 +243,8 @@ def _read_appinfo_v42(mm, wanted: set[int] | None) -> dict[int, dict]:
     if count == 0:
         return {}
     if index_size % count or data_off + data_size > len(mm):
-        raise ValueError("appinfo v42: unerwartete Kopfdaten")
+        raise ValueError(f"appinfo v42: unexpected header (apps={count}, index={index_size}, "
+                         f"strings={nstrings}/{strtab_size}, data={data_size}, file={len(mm)})")
     rec_size = index_size // count
     strings: list[str] = []
     p = strtab_off

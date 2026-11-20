@@ -76,50 +76,53 @@ INFRA = {"wineserver", "wineserver64", "winedevice.exe", "services.exe", "plugpl
          "crashpad_handle", "mscorsvw.exe", "rundll32.exe", "winemenubuilder"}
 
 
-def group_members(pgid: int) -> list[tuple[int, str]]:
-    out = []
+
+
+def become_subreaper() -> bool:
+    """Orphaned grandchildren (games whose launcher exits, Wine helpers) are re-parented
+    to us instead of init, so we can keep track of them – like Steam's own 'reaper'."""
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        PR_SET_CHILD_SUBREAPER = 36
+        return libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0
+    except Exception:
+        return False
+
+
+def descendants(root: int) -> list[tuple[int, str]]:
+    """All live (non-zombie) descendants of *root* as (pid, comm)."""
+    children: dict[int, list[int]] = {}
+    comm: dict[int, str] = {}
     try:
         entries = os.listdir("/proc")
     except OSError:
-        return out
+        return []
     for d in entries:
         if not d.isdigit():
             continue
         try:
             with open(f"/proc/{d}/stat") as fh:
                 raw = fh.read()
-            comm = raw[raw.index("(") + 1:raw.rindex(")")]
             parts = raw.rsplit(")", 1)[1].split()
-            if int(parts[2]) == pgid and parts[0] != "Z":
-                out.append((int(d), comm))
+            if parts[0] == "Z":
+                continue
+            pid = int(d)
+            comm[pid] = raw[raw.index("(") + 1:raw.rindex(")")]
+            children.setdefault(int(parts[1]), []).append(pid)
         except (OSError, IndexError, ValueError):
             continue
+    out, todo = [], list(children.get(root, []))
+    while todo:
+        pid = todo.pop()
+        if pid in comm:
+            out.append((pid, comm[pid]))
+        todo.extend(children.get(pid, []))
     return out
 
 
-def real_game_alive(pgid: int) -> bool:
-    """True if anything other than Wine/Proton/runtime leftovers is still running."""
-    return any(c.lower() not in INFRA for _k, c in group_members(pgid))
 
 
-def group_alive(pgid: int) -> bool:
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    # killpg(0) also succeeds for zombies only; check /proc for a live member
-    for d in os.listdir("/proc"):
-        if d.isdigit():
-            try:
-                with open(f"/proc/{d}/stat") as fh:
-                    parts = fh.read().rsplit(")", 1)[1].split()
-                if int(parts[2]) == pgid and parts[0] != "Z":
-                    return True
-            except (OSError, IndexError, ValueError):
-                continue
-    return False
 
 
 class Agent:
@@ -138,6 +141,7 @@ class Agent:
         self.me = ""
         self.guest_link = ""
         self.guest_link_ts = 0.0
+        self.guest_requested = 0.0
         self.events: list[dict] = []
         self.event_id = 0
         self.proc: subprocess.Popen | None = None
@@ -148,21 +152,26 @@ class Agent:
         self.avatar_done: set[tuple[int, int]] = set()
         self.idle_since = 0.0          # only leftovers alive since …
         self.steam_gone_since = 0.0
+        self.orphan_since = 0.0
         REQ_DIR.mkdir(parents=True, exist_ok=True)
         AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ steam
     def init_steam(self) -> None:
         from .steamworks import Steamworks, SteamworksError
+        from .steam_lib import Steam, libsteam_api_score
         cfg = Config.load()
-        lib = cfg.libsteam_api
-        if not lib or not Path(lib).exists():
-            try:
-                from .steam_lib import Steam
-                libs = Steam(cfg.steam_root or None).find_libsteam_api()
-                lib = str(libs[0]) if libs else ""
-            except Exception as e:  # pragma: no cover
-                log(_('Suche nach libsteam_api.so fehlgeschlagen: {e}').format(e=e))
+        lib = cfg.libsteam_api if cfg.libsteam_api and Path(cfg.libsteam_api).exists() else ""
+        try:
+            libs = Steam(cfg.steam_root or None).find_libsteam_api()
+        except Exception as e:  # pragma: no cover
+            libs = []
+            log(_('Suche nach libsteam_api.so fehlgeschlagen: {e}').format(e=e))
+        # use the best library available (newest Remote Play interface), not just the saved one
+        if libs and (not lib or (libsteam_api_score(Path(lib)) or ()) < (libsteam_api_score(libs[0]) or ())):
+            if lib:
+                log(_("Bessere libsteam_api.so gefunden: {new} (statt {old})").format(new=libs[0], old=lib))
+            lib = str(libs[0])
         if not lib:
             self.steam_error = _('Keine libsteam_api.so gefunden (Einrichtung ③).')
             log(self.steam_error)
@@ -176,6 +185,8 @@ class Agent:
             return
         self.sw = sw
         self.me = sw.my_name()
+        log(_("Remote-Play-Schnittstelle v{v}, Callbacks: {mode}").format(
+            v=sw.remote_version, mode=sw.callback_mode))
         log(_('Steam-API bereit ({lib}), AppID {app_id}, angemeldet als {me}').format(lib=lib, app_id=sw.app_id, me=self.me))
 
     def event(self, kind: str, text: str) -> None:
@@ -269,42 +280,77 @@ class Agent:
                         "summary": req.get("summary", "")}
         log(_('Spiel gestartet: {v0} pid={pid} argv={v2}').format(v0=req.get('name'), pid=self.proc.pid, v2=req['argv']))
 
+    def reap(self) -> None:
+        """Collect exit status of re-parented children (avoid zombies)."""
+        if self.proc and self.proc.returncode is None:
+            self.proc.poll()
+        while True:
+            try:
+                pid, status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                return
+            if pid == 0:
+                return
+            if self.proc and pid == self.proc.pid and self.proc.returncode is None:
+                self.proc.returncode = os.waitstatus_to_exitcode(status) \
+                    if hasattr(os, "waitstatus_to_exitcode") else status
+
+    def real_processes(self) -> list[tuple[int, str]]:
+        """Descendants of the agent that are not Wine/Proton/runtime helpers."""
+        return [(p, c) for p, c in descendants(os.getpid()) if c.lower() not in INFRA]
+
     def game_running(self) -> bool:
-        """True while the game itself runs. Lingering Wine/Proton helpers do not count
-        (for more than 15 s) – they are cleaned up instead of blocking the session."""
+        """True while the game runs. The launched process (for Proton: the proton script,
+        which waits for the whole Wine session) counts as running as long as it lives –
+        it is never killed automatically. Only when it has exited and nothing but
+        Wine/Proton helpers is left (for 15 s), those leftovers are cleaned up."""
         if not self.proc:
             return False
-        pg = self.proc.pid
-        if not group_alive(pg):
-            return False
-        if real_game_alive(pg):
+        if self.proc.poll() is None:
             self.idle_since = 0.0
             return True
+        procs = descendants(os.getpid())
+        if not procs:
+            return False
+        if any(c.lower() not in INFRA for _p, c in procs):
+            self.idle_since = 0.0
+            return True                      # launcher-style game: main exited, game lives on
         if not self.idle_since:
             self.idle_since = time.time()
             return True
         if time.time() - self.idle_since < 15:
             return True
-        log(_('Nur noch Hintergrundprozesse übrig ({v0}) – räume auf').format(v0=', '.join(c for _k, c in group_members(pg))))
-        self.kill_group(pg)
+        log(_('Nur noch Hintergrundprozesse übrig ({v0}) – räume auf').format(
+            v0=', '.join(c for _p, c in procs)))
+        self.kill_tree()
         return False
 
-    def kill_group(self, pg: int) -> None:
+    def kill_tree(self) -> None:
+        """Terminate everything this agent started (also processes in other groups)."""
         for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(pg, sig)
-            except (ProcessLookupError, PermissionError):
-                return
-            for _i in range(20):
-                if not group_alive(pg):
+            procs = descendants(os.getpid())
+            if self.proc:
+                try:
+                    os.killpg(self.proc.pid, sig)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            for pid, _c in procs:
+                try:
+                    os.kill(pid, sig)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            for _i in range(30):
+                if not descendants(os.getpid()):
+                    if self.proc:
+                        self.proc.poll()
                     return
                 time.sleep(0.1)
 
     def stop_game(self) -> None:
-        if not self.proc:
+        if not self.proc and not descendants(os.getpid()):
             return
-        log(_('Beende Spiel pid={pid}').format(pid=self.proc.pid))
-        self.kill_group(self.proc.pid)
+        log(_('Beende Spiel pid={pid}').format(pid=self.proc.pid if self.proc else "-"))
+        self.kill_tree()
 
     # ------------------------------------------------------------------ requests
     def handle(self, req: dict) -> None:
@@ -323,12 +369,13 @@ class Agent:
             log(_('Einladung an {sid}: {v1}').format(sid=sid, v1='ok' if ok else 'abgelehnt'))
             self.event("invite_ok" if ok else "invite_fail", str(sid))
         elif cmd == "guest" and self.sw:
+            self.guest_requested = time.time()
             ok = self.sw.invite(0)
             log(_('Gast-Link angefordert: {v0}').format(v0='ok' if ok else 'abgelehnt'))
             if not ok:
                 self.event("error", _('Steam hat den Gast-Link abgelehnt.'))
         elif cmd == "overlay" and self.sw:
-            self.sw.start_rpt_ui()
+            log(_("Remote-Play-Together-Fenster von Steam geöffnet: {ok}").format(ok=self.sw.start_rpt_ui()))
         elif cmd == "friends":
             self.refresh_friends()
         elif cmd in ("invite", "guest", "overlay"):
@@ -387,10 +434,12 @@ class Agent:
             (DONOR_DIR / "stop").unlink()
         except OSError:
             pass
+        log(_("Subreaper aktiv: {ok}").format(ok=become_subreaper()))
         self.init_steam()
         self.refresh_friends()
         tick = 0
         while not self.stop:
+            self.reap()
             self.pump()
             if tick % 5 == 0:
                 self.process_requests()
@@ -409,9 +458,19 @@ class Agent:
                     self.steam_gone_since = 0.0
                 if self.host_fresh(15):
                     self.host_seen = True
+                    self.orphan_since = 0.0
                 elif self.host_seen and not self.game_running():
                     log(_('App beendet – Session endet'))
                     break
+                elif self.host_seen and not self.real_processes():
+                    # app closed, and only Wine/Proton helpers are left (e.g. a hanging
+                    # wineserver keeps the proton script alive) -> clean up after 30 s
+                    if not self.orphan_since:
+                        self.orphan_since = time.time()
+                    elif time.time() - self.orphan_since > 30:
+                        log(_('App beendet, nur noch Hintergrundprozesse – räume auf'))
+                        self.stop_game()
+                        break
                 elif not self.host_fresh(1800) and self.host_seen:
                     log(_('App seit 30 min weg – Session endet'))
                     self.stop_game()
@@ -422,12 +481,18 @@ class Agent:
                 self.write_state()
             if tick % 20 == 0:
                 self.refresh_sessions()
+            if self.guest_requested and time.time() - self.guest_requested > 10:
+                self.guest_requested = 0.0
+                if not self.guest_link_ts or time.time() - self.guest_link_ts > 15:
+                    seen = sorted(self.sw.seen_callbacks) if self.sw else []
+                    log(_("Kein Gast-Link von Steam nach 10 s (empfangene Callbacks: {seen})").format(
+                        seen=seen or "-"))
             if tick % 150 == 0 and tick:
                 self.refresh_friends()
             tick += 1
             time.sleep(0.1)
-        if self.proc and group_alive(self.proc.pid) and not real_game_alive(self.proc.pid):
-            self.kill_group(self.proc.pid)
+        if descendants(os.getpid()) and not self.real_processes():
+            self.kill_tree()
         for f in ("state.json", "stop"):
             try:
                 (DONOR_DIR / f).unlink()

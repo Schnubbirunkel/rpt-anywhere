@@ -97,7 +97,6 @@
  "nichts lief": "nothing was running",
  "Notaus: Es lief nichts mehr.": "Emergency stop: nothing was running anymore.",
  "Kein Gast-Link nach 15 s erhalten": "No guest link received after 15 s",
- "Steam hat keinen Gast-Link geliefert. Läuft schon ein Spiel? Alternativ: Shift+Tab → Remote Play Together.": "Steam did not deliver a guest link. Is a game running already? Alternatively: Shift+Tab → Remote Play Together.",
  "Tipp: Starte zuerst ein Spiel – sonst sehen Freunde nur einen leeren Stream.": "Tip: start a game first – otherwise your friends only see an empty stream.",
  "Beenden?": "Quit?",
  "Version {version__}": "Version {version__}",
@@ -333,5 +332,12 @@
  "Eingetragen ✓ (Backup: {name}). Du kannst Steam jetzt starten.": "Set ✓ (backup: {name}). You can start Steam now.",
  "Gefunden: {path}": "Found: {path}",
  "Erkannt: {root}": "Detected: {root}",
- "Spiel: {name}": "Game: {name}"
+ "Spiel: {name}": "Game: {name}",
+ "Steam hat keinen Gast-Link geliefert – Steams Remote-Play-Together-Fenster wurde geöffnet, dort kannst du den Link erstellen (sonst: Shift+Tab im Spiel).": "Steam did not deliver a guest link – Steam's Remote Play Together window was opened, you can create the link there (otherwise: Shift+Tab in the game).",
+ "Bessere libsteam_api.so gefunden: {new} (statt {old})": "Better libsteam_api.so found: {new} (instead of {old})",
+ "Remote-Play-Schnittstelle v{v}, Callbacks: {mode}": "Remote Play interface v{v}, callbacks: {mode}",
+ "Remote-Play-Together-Fenster von Steam geöffnet: {ok}": "Opened Steam's Remote Play Together window: {ok}",
+ "Kein Gast-Link von Steam nach 10 s (empfangene Callbacks: {seen})": "No guest link from Steam after 10 s (callbacks received: {seen})",
+ "Subreaper aktiv: {ok}": "Subreaper active: {ok}",
+ "App beendet, nur noch Hintergrundprozesse – räume auf": "App closed, only background processes left – cleaning up"
 }

@@ -31,6 +31,27 @@ class CallbackMsg(C.Structure):
                 ("param", C.POINTER(C.c_uint8)), ("size", C.c_int32)]
 
 
+# --- classic callback registration (CCallbackBase emulation) -------------------
+# class CCallbackBase { virtual void Run(void*); virtual void Run(void*, bool, SteamAPICall_t);
+#                       virtual int GetCallbackSizeBytes(); uint8 m_nCallbackFlags; int m_iCallback; }
+# GCC/Itanium ABI: vtable entries in declaration order, vptr at offset 0.
+RUN_FN = C.CFUNCTYPE(None, C.c_void_p, C.c_void_p)
+RUN_CALL_FN = C.CFUNCTYPE(None, C.c_void_p, C.c_void_p, C.c_bool, C.c_uint64)
+SIZE_FN = C.CFUNCTYPE(C.c_int, C.c_void_p)
+
+
+class _VTable(C.Structure):
+    _fields_ = [("run", RUN_FN), ("run_call", RUN_CALL_FN), ("size", SIZE_FN)]
+
+
+class _CallbackObj(C.Structure):
+    _fields_ = [("vtable", C.POINTER(_VTable)), ("flags", C.c_uint8), ("icallback", C.c_int)]
+
+
+CALLBACK_SIZES = {CB_REMOTEPLAY_CONNECTED: 4, CB_REMOTEPLAY_DISCONNECTED: 4,
+                  CB_REMOTEPLAY_GUEST_INVITE: 1024}
+
+
 class FriendGameInfo(C.Structure):
     _pack_ = 4
     _fields_ = [("game_id", C.c_uint64), ("ip", C.c_uint32), ("game_port", C.c_uint16),
@@ -72,6 +93,12 @@ class Steamworks:
         self.friends = self.remote = self.utils = self.user = None
         self.app_id = 0
         self.can_start_rpt = False
+        self._found_version = 0
+        self.remote_version = 0
+        self.callback_mode = "none"
+        self.seen_callbacks: set[int] = set()
+        self._cb_keep: list = []
+        self._unregister = None
 
     # ------------------------------------------------------------------ init
     def _fn(self, name, restype, *argtypes, required=True):
@@ -91,6 +118,7 @@ class Steamworks:
             if f:
                 ptr = f()
                 if ptr:
+                    self._found_version = v
                     return ptr
         raise SteamworksError(_('Interface {base} nicht verfügbar').format(base=base))
 
@@ -102,10 +130,18 @@ class Steamworks:
         except OSError as e:
             raise SteamworksError(_('Konnte {lib_path} nicht laden: {e}').format(lib_path=self.lib_path, e=e)) from e
 
-        # Manual dispatch lets us read callbacks (guest invite URL) without C++ vtables.
-        md_init = self._fn("SteamAPI_ManualDispatch_Init", None, required=False)
-        if md_init:
-            md_init()
+        # Callbacks (guest invite URL, players joining): classic SteamAPI_RegisterCallback
+        # works with every SDK version. Manual dispatch only if that is missing – mixing
+        # both breaks SteamAPI_RunCallbacks.
+        self._register = self._fn("SteamAPI_RegisterCallback", None, C.c_void_p, C.c_int,
+                                  required=False)
+        self._unregister = self._fn("SteamAPI_UnregisterCallback", None, C.c_void_p,
+                                    required=False)
+        md_init = None
+        if not self._register:
+            md_init = self._fn("SteamAPI_ManualDispatch_Init", None, required=False)
+            if md_init:
+                md_init()
         init_flat = self._fn("SteamAPI_InitFlat", C.c_int, C.c_char_p, required=False)
         if init_flat:
             err = C.create_string_buffer(1024)
@@ -133,6 +169,17 @@ class Steamworks:
 
         self.friends = self._accessor("SteamFriends", (18, 17, 16, 15))
         self.remote = self._accessor("SteamRemotePlay", (4, 3, 2, 1))
+        self.remote_version = self._found_version
+        self._events: list[tuple[str, object]] = []
+        self.seen_callbacks: set[int] = set()
+        self._cb_keep: list = []
+        self.callback_mode = "none"
+        if self._register:
+            for cb in CALLBACK_SIZES:
+                self._register_callback(cb)
+            self.callback_mode = "register"
+        elif md_init:
+            self.callback_mode = "manual"
         self.utils = self._accessor("SteamUtils", (10, 9))
         self.user = self._accessor("SteamUser", (23, 22, 21, 20))
 
@@ -161,16 +208,55 @@ class Steamworks:
         self._invite = f("SteamAPI_ISteamRemotePlay_BSendRemotePlayTogetherInvite", B, P, U64)
         self._start_rpt = f("SteamAPI_ISteamRemotePlay_BStartRemotePlayTogether", B, P, B,
                             required=False)
-        self.can_start_rpt = self._start_rpt is not None
+        self._show_rpt_ui = f("SteamAPI_ISteamRemotePlay_ShowRemotePlayTogetherUI", B, P,
+                              required=False)
+        self.can_start_rpt = self._start_rpt is not None or self._show_rpt_ui is not None
         self.app_id = int(self._get_appid(self.utils))
 
     def shutdown(self) -> None:
+        if self.lib is not None and self._unregister:
+            for _vt, obj, *_rest in self._cb_keep:
+                try:
+                    self._unregister(C.byref(obj))
+                except Exception:
+                    pass
         if self.lib is not None:
             try:
                 self._shutdown()
             except Exception:
                 pass
             self.lib = None
+
+    # ------------------------------------------------------------------ callbacks
+    def _register_callback(self, cb_id: int) -> None:
+        def run(this, param):
+            self.seen_callbacks.add(cb_id)
+            try:
+                self._handle_callback(cb_id, param, CALLBACK_SIZES[cb_id])
+            except Exception:
+                pass
+
+        def run_call(this, param, io_failure, call):
+            run(this, param)
+
+        def size(this):
+            return CALLBACK_SIZES[cb_id]
+
+        vt = _VTable(RUN_FN(run), RUN_CALL_FN(run_call), SIZE_FN(size))
+        obj = _CallbackObj(C.pointer(vt), 0, cb_id)
+        self._cb_keep.append((vt, obj, run, run_call, size))
+        self._register(C.byref(obj), cb_id)
+
+    def _handle_callback(self, cb_id: int, param, size: int) -> None:
+        if not param:
+            return
+        if cb_id == CB_REMOTEPLAY_GUEST_INVITE:
+            raw = C.string_at(param, 1024)
+            self._events.append(("guest_link", raw.split(b"\0", 1)[0].decode("utf-8", "replace")))
+        elif cb_id in (CB_REMOTEPLAY_CONNECTED, CB_REMOTEPLAY_DISCONNECTED):
+            sid = C.cast(param, C.POINTER(C.c_uint32))[0]
+            self._events.append(("session_connected" if cb_id == CB_REMOTEPLAY_CONNECTED
+                                 else "session_disconnected", int(sid)))
 
     def steam_running(self) -> bool:
         if not self.ready or not self._is_running:
@@ -189,9 +275,10 @@ class Steamworks:
         """Pump Steam callbacks. Returns [(kind, payload), ...]."""
         if not self.ready:
             return []
-        if not self._md:
+        if self.callback_mode != "manual" or not self._md:
             self._run_callbacks()
-            return []
+            events, self._events = self._events, []
+            return events
         pipe, frame, nxt, free = self._md
         events: list[tuple[str, object]] = []
         frame(pipe)
@@ -199,6 +286,7 @@ class Steamworks:
         while nxt(pipe, C.byref(msg)):
             try:
                 cb = msg.callback
+                self.seen_callbacks.add(cb)
                 if cb == CB_REMOTEPLAY_GUEST_INVITE and msg.size > 0:
                     raw = C.string_at(msg.param, min(msg.size, 1024))
                     events.append(("guest_link", raw.split(b"\0", 1)[0].decode("utf-8", "replace")))
@@ -251,6 +339,9 @@ class Steamworks:
         return bool(self._invite(self.remote, C.c_uint64(steamid)))
 
     def start_rpt_ui(self) -> bool:
+        """Open Steam's own Remote Play Together window (can create guest links too)."""
+        if self._show_rpt_ui and self._show_rpt_ui(self.remote):
+            return True
         if self._start_rpt:
             return bool(self._start_rpt(self.remote, True))
         self._overlay(self.friends, b"Friends")

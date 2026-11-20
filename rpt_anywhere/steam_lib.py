@@ -466,9 +466,14 @@ def libsteam_api_score(path: Path) -> tuple | None:
         return None
     if b"SteamAPI_ISteamRemotePlay_BSendRemotePlayTogetherInvite" not in data:
         return None
+    import re as _re
+    versions = [int(v) for v in _re.findall(rb"SteamAPI_SteamRemotePlay_v(\d{3})", data)]
+    rp_version = max(versions) if versions else 0
+    has_ui = b"SteamAPI_ISteamRemotePlay_ShowRemotePlayTogetherUI" in data
     has_start = b"SteamAPI_ISteamRemotePlay_BStartRemotePlayTogether" in data
-    has_initflat = b"SteamAPI_InitFlat" in data
-    return (has_start, has_initflat, path.stat().st_mtime)
+    has_register = b"SteamAPI_RegisterCallback" in data
+    bundled = b"node_modules" not in str(path).encode()   # prefer libs shipped by games
+    return (rp_version, has_ui or has_start, has_register, bundled, path.stat().st_mtime)
 
 
 def clean_env() -> dict:

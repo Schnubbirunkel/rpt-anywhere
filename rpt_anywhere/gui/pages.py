@@ -173,7 +173,7 @@ class LibraryPage(QWidget):
 class SessionPanel(QWidget):
     start_donor = Signal()
     stop_game = Signal()
-    invite = Signal(int)
+    invite = Signal(object)
     guest_link = Signal()
     open_overlay = Signal()
 

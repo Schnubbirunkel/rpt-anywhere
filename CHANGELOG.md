@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.1] – 2026-11-20
+
+### Fixed
+- **Guest links from the app now arrive.** Steam callbacks are received through the classic `SteamAPI_RegisterCallback` mechanism, which works with every Steamworks SDK version. Before, the agent relied on "manual dispatch", which silently failed with some `libsteam_api.so` builds, so Steam created the link but the app never saw it.
+- **Inviting a friend from the app works.** 64-bit Steam IDs overflowed a 32-bit Qt signal when the invite button was clicked.
+- **Proton games are no longer cut off from Steam.** The leftover cleanup could terminate Proton's `steam.exe` bridge ~15 s after the start because the actual game runs in its own process group. Games are now tracked through all descendants of the agent (which acts as a child subreaper like Steam's own `reaper`); the launched process is never killed automatically while it is alive. Guests that were stuck at "Please wait" were affected by this.
+- *Stop game* now also ends game processes that run in their own process group or session.
+
+### Improved
+- The agent picks the best available `libsteam_api.so` (newest Remote Play interface, libraries shipped with games preferred over `node_modules` copies) instead of keeping a previously saved one.
+- The *Steam overlay* button opens Steam's own Remote Play Together window (`ShowRemotePlayTogetherUI`). If no guest link arrives within 15 s, that window opens automatically so the link can be created there.
+- More diagnostics in the donor placeholder log: Remote Play interface version, callback mode, received callbacks, appinfo header values of unreadable files.
+
 ## [0.4.0] – 2026-11-20
 
 First public release.

@@ -651,7 +651,10 @@ class MainWindow(QMainWindow):
         if self._guest_requested and time.time() - self._guest_requested > 15:
             self._guest_requested = 0.0
             log.warning(_('Kein Gast-Link nach 15 s erhalten'))
-            self.toast(_('Steam hat keinen Gast-Link geliefert. Läuft schon ein Spiel? Alternativ: Shift+Tab → Remote Play Together.'), "warn")
+            self.link.send("overlay")
+            self.toast(_("Steam hat keinen Gast-Link geliefert – Steams Remote-Play-Together-Fenster "
+                         "wurde geöffnet, dort kannst du den Link erstellen (sonst: Shift+Tab im Spiel)."),
+                       "warn")
 
     def _tick(self):
         self._poll_donor()

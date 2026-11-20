@@ -297,7 +297,7 @@ class GameCard(QWidget):
 
 # --------------------------------------------------------------------------- #
 class FriendRow(QWidget):
-    invite = Signal(int)
+    invite = Signal(object)
 
     def __init__(self, steamid: int, name: str, status: str, online: bool, in_game: bool,
                  parent=None):
