@@ -118,6 +118,23 @@ class GameDialog(QDialog):
         self.own_appid.setChecked(game.own_appid)
         self.own_appid.setVisible(is_steam)
         form.addRow("", self.own_appid)
+        sopts = ""
+        if is_steam and steam and game.steam_appid:
+            try:
+                sopts = steam.get_launch_options(game.steam_appid) or ""
+            except Exception:
+                sopts = ""
+        self.steam_options = QCheckBox(_('Steam-Startoptionen des Spiels übernehmen'))
+        self.steam_options.setToolTip(_('Variablen (z. B. WINEDLLOVERRIDES für Mods/OptiScaler), Programme vor %command% und Argumente danach werden wie in Steam angewendet.'))
+        self.steam_options.setChecked(game.steam_options)
+        self.steam_options.setVisible(is_steam)
+        form.addRow("", self.steam_options)
+        self.steam_options_text = QLabel(sopts or _('(keine gesetzt)'))
+        self.steam_options_text.setObjectName("Small")
+        self.steam_options_text.setWordWrap(True)
+        self.steam_options_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.steam_options_text.setVisible(is_steam)
+        form.addRow("", self.steam_options_text)
         v.addLayout(form)
 
         self.hint = label("", "Small", wrap=True)
@@ -181,6 +198,7 @@ class GameDialog(QDialog):
                     env[k.strip()] = val.strip()
         g.env = env
         g.own_appid = self.own_appid.isChecked()
+        g.steam_options = self.steam_options.isChecked()
         if g.runner != "steam" and not g.exe:
             self.hint.setText(_('Bitte ein Programm bzw. einen Befehl angeben.'))
             self.hint.setStyleSheet("color:#f87171;")

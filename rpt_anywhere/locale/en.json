@@ -353,5 +353,9 @@
  "Prozesse ({why}): {procs}": "Processes ({why}): {procs}",
  "20 s nach Spielstart": "20 s after game start",
  "Gast verbunden": "guest connected",
- "Steam-Startparameter: {args}  | PipeWire-Desktopaufnahme: {pw}": "Steam launch parameters: {args}  | PipeWire desktop capture: {pw}"
+ "Steam-Startparameter: {args}  | PipeWire-Desktopaufnahme: {pw}": "Steam launch parameters: {args}  | PipeWire desktop capture: {pw}",
+ "Variablen (z. B. WINEDLLOVERRIDES für Mods/OptiScaler), Programme vor %command% und Argumente danach werden wie in Steam angewendet.": "Variables (e.g. WINEDLLOVERRIDES for mods/OptiScaler), programs before %command% and arguments after it are applied just like in Steam.",
+ "Steam-Startoptionen des Spiels übernehmen": "Apply the game's Steam launch options",
+ "Steam-Startoptionen: {opts}": "Steam launch options: {opts}",
+ "(keine gesetzt)": "(none set)"
 }

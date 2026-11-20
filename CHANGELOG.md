@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.7] – 2026-11-20
+
+### Added
+- Steam games now start with their own **Steam launch options**, just like in Steam: variables before `%command%` (e.g. `WINEDLLOVERRIDES` for mods/OptiScaler), wrapper programs (e.g. `gamemoderun`, `mangohud`, `gamescope`) and arguments after it. Can be switched off per game in the edit dialog, which also shows the current options. The game's own environment field takes precedence.
+
 ## [0.4.6] – 2026-11-20
 
 ### Fixed

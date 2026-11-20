@@ -46,6 +46,7 @@ class Game:
     prefix: str = ""                  # Wine/Proton prefix ("" = automatic)
     steam_appid: int = 0              # for runner == steam / imported shortcuts
     own_appid: bool = False           # run with the game's own SteamAppId instead of the donor's
+    steam_options: bool = True        # apply the game's own Steam launch options (env, wrappers, args)
     image: str = ""
     favorite: bool = False
     hidden: bool = False

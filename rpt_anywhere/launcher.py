@@ -40,6 +40,37 @@ def game_env(extra: dict | None = None, donor: dict | None = None) -> dict:
     return env
 
 
+_ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def parse_launch_options(opts: str) -> tuple[dict, list[str], list[str]]:
+    """Split Steam launch options like ``VAR=1 gamemoderun %command% -dx11`` into
+    (environment, wrapper commands before %command%, extra game arguments).
+    Without %command% Steam passes everything as game arguments."""
+    try:
+        tokens = shlex.split(opts, comments=False)
+    except ValueError:
+        tokens = opts.split()
+    for i, t in enumerate(tokens):
+        if t.startswith("#"):
+            tokens = tokens[:i]
+            break
+    if "%command%" not in tokens:
+        return {}, [], tokens
+    i = tokens.index("%command%")
+    before, after = tokens[:i], tokens[i + 1:]
+    env: dict = {}
+    while before and _ENV_RE.match(before[0]):
+        k, _sep, v = before.pop(0).partition("=")
+        env[k] = v
+    if before[:1] == ["env"]:                       # "env VAR=1 %command%"
+        before.pop(0)
+        while before and _ENV_RE.match(before[0]):
+            k, _sep, v = before.pop(0).partition("=")
+            env[k] = v
+    return env, before, after
+
+
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "game"
 
@@ -77,8 +108,14 @@ def plan(game: Game, steam: Steam, default_proton: str = "", donor: dict | None 
     cwd = os.path.expanduser(game.workdir) if game.workdir else None
     prefix = os.path.expanduser(game.prefix) if game.prefix else ""
     proton_name = game.proton or default_proton
+    wrappers: list[str] = []
+    adopted = ""
 
     def mk(argv, summary, where="agent", note=""):
+        if wrappers:
+            argv = [*wrappers, *argv]
+        if adopted:
+            summary += "\n" + _('Steam-Startoptionen: {opts}').format(opts=adopted)
         return Plan(argv, game_env(extra, donor), cwd, summary, dict(extra), where, note)
 
     # ---------------------------------------------------------- Steam library game
@@ -99,6 +136,15 @@ def plan(game: Game, steam: Steam, default_proton: str = "", donor: dict | None 
         elif not os.path.isabs(exe):
             exe = resolve_ci(app.path, exe) or str(app.path / exe)
         cwd = cwd or str(Path(exe).parent)
+        if game.steam_options:
+            opts = (steam.get_launch_options(app.appid) or "").strip()
+            if opts and "rpt-anywhere" not in opts:
+                s_env, s_wrap, s_args = parse_launch_options(opts)
+                for k, v in s_env.items():
+                    extra.setdefault(k, v)          # the game's own env field wins
+                wrappers = s_wrap
+                args = args + s_args
+                adopted = opts
         windows = exe.lower().endswith((".exe", ".bat", ".msi"))
         if game.own_appid:
             extra.update(SteamAppId=str(app.appid), SteamGameId=str(app.appid))
