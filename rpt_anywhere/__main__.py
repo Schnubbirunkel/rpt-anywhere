@@ -40,6 +40,10 @@ def diagnose(cfg) -> int:
     print(_('RPT Anywhere {version__}').format(version__=__version__))
     s = Steam(cfg.steam_root or None)
     print(_('Steam-Ordner: {root}  (ok={ok}, flatpak={is_flatpak}, läuft={v3})').format(root=s.root, ok=s.ok, is_flatpak=s.is_flatpak, v3=s.is_running()))
+    pw = s.pipewire_capture()
+    print(_('Steam-Startparameter: {args}  | PipeWire-Desktopaufnahme: {pw}').format(
+        args=" ".join((s.launch_args() or [])[1:]) or "-",
+        pw="?" if pw is None else (_("ja") if pw else _("nein"))))
     for lib in s.libraries():
         print(_('  Bibliothek: {lib}').format(lib=lib))
     files = s.appinfo_files()

@@ -4,6 +4,7 @@
 
 ### Added
 - The donor log lists the game's processes (PID, name, program) 20 s after the start and whenever a guest connects. This shows which process Steam may be streaming when a guest only sees “Please wait”.
+- `--diagnose` shows Steam's launch parameters and whether PipeWire desktop capture (`-pipewire`) is enabled.
 
 ## [0.4.4] – 2026-11-20
 

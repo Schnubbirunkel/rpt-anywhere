@@ -418,6 +418,23 @@ class Steam:
         return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"
 
     # ---------------------------------------------------------------- process
+    def launch_args(self) -> list[str] | None:
+        """Command line of the running Steam client (None if not found)."""
+        pidfile = Path("~/.steam/steam.pid").expanduser()
+        try:
+            pid = int(pidfile.read_text().strip())
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except Exception:
+            return None
+        return [a.decode(errors="replace") for a in raw.split(b"\0") if a]
+
+    def pipewire_capture(self) -> bool | None:
+        """True if Steam runs with -pipewire (desktop capture for Remote Play)."""
+        args = self.launch_args()
+        if args is None:
+            return None
+        return any(a in ("-pipewire", "-pipewire-dmabuf") for a in args)
+
     def is_running(self) -> bool:
         pidfile = Path("~/.steam/steam.pid").expanduser()
         try:

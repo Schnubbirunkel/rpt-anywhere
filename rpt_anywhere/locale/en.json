@@ -352,5 +352,6 @@
  "»{name}« ist mit Steams Kopierschutz (SteamStub) versehen und startet nur, wenn Steam genau dieses Spiel startet – nicht über einen Donor. Steam würde mit „Application load error V:0000065432“ abbrechen.": "»{name}« uses Steam's DRM (SteamStub) and only starts when Steam launches exactly this game – not through a donor. Steam would abort with “Application load error V:0000065432”.",
  "Prozesse ({why}): {procs}": "Processes ({why}): {procs}",
  "20 s nach Spielstart": "20 s after game start",
- "Gast verbunden": "guest connected"
+ "Gast verbunden": "guest connected",
+ "Steam-Startparameter: {args}  | PipeWire-Desktopaufnahme: {pw}": "Steam launch parameters: {args}  | PipeWire desktop capture: {pw}"
 }
