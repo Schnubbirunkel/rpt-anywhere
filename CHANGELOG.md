@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.6] – 2026-11-20
+
+### Fixed
+- Some Proton games (e.g. Nivalis Nights) showed guests only “Please wait” and no sound. Proton started its controller helper Xalia, which puts an invisible window over the game – Steam streamed that window instead of the game. Proton launches now set `PROTON_USE_XALIA=0` (can be overridden per game in the environment field).
+
 ## [0.4.5] – 2026-11-20
 
 ### Added

@@ -168,6 +168,9 @@ def plan(game: Game, steam: Steam, default_proton: str = "", donor: dict | None 
             "STEAM_COMPAT_CLIENT_INSTALL_PATH": str(steam.root),
         })
         extra.setdefault("STEAM_COMPAT_INSTALL_PATH", str(Path(exe).parent))
+        # Xalia (Proton's controller helper) puts an invisible window over some games;
+        # Steam then streams that window and guests only see "Please wait".
+        extra.setdefault("PROTON_USE_XALIA", "0")
         entry = steam.runtime_entry_point(tool.runtime_appid)
         summary = f"{tool.name} · {Path(exe).name}"
         if container:
