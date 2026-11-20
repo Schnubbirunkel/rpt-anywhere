@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CODE=$(python3 -c "import re;print(re.search(r'__version__ = \"(.+?)\"', open('rpt_anywhere/__init__.py').read()).group(1))")
+          echo "tag=$TAG code=$CODE"
+          test "$TAG" = "$CODE"
+          echo "VERSION=$TAG" >> "$GITHUB_ENV"
+
+      - name: Checks
+        run: |
+          python3 -m compileall -q rpt_anywhere
+          python3 tools/i18n_check.py
+
+      - name: Build archive
+        run: |
+          NAME="rpt-anywhere-$VERSION"
+          mkdir -p "dist/$NAME"
+          cp -r bin rpt_anywhere install.sh uninstall.sh README.md README.de.md CHANGELOG.md LICENSE "dist/$NAME/"
+          find "dist/$NAME" -name '__pycache__' -prune -exec rm -rf {} +
+          tar -C dist -czf "dist/$NAME.tar.gz" "$NAME"
+          (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
+
+      - name: Release notes from CHANGELOG
+        run: |
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[?" v "\\]?" {on=1; next}
+            on && /^## / {exit}
+            on {print}
+          ' CHANGELOG.md > notes.md
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: RPT Anywhere ${{ env.VERSION }}
+          body_path: notes.md
+          files: |
+            dist/rpt-anywhere-${{ env.VERSION }}.tar.gz
+            dist/rpt-anywhere-${{ env.VERSION }}.tar.gz.sha256

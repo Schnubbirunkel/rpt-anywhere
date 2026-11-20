@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# RPT Anywhere – Steam Remote Play Together for any game.
+#
+# Two roles:
+#  * started normally (menu/terminal)  -> runs the GUI on the host
+#  * started by Steam through the donor game's launch option:
+#        "/path/rpt-anywhere" --donor # %command%
+#    -> "donor placeholder": plain bash, works inside Steam's runtime/Proton
+#       container too. It starts the Python agent (stdlib only) which launches
+#       games as children of Steam and talks to the Steam API; without python3
+#       it falls back to just keeping the session alive.
+set -u
+
+INVOKED="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+REAL="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+APPDIR="$(dirname "$(dirname "$REAL")")"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/rpt-anywhere"
+DONOR="$CACHE/donor"
+
+is_donor=0
+for a in "$@"; do [ "$a" = "--donor" ] && is_donor=1; done
+[ -n "${SteamAppId:-}${SteamGameId:-}" ] && [ "$is_donor" = 0 ] && [ $# -eq 0 ] && is_donor=1
+
+# --------------------------------------------------------------------------- #
+#  Donor placeholder
+# --------------------------------------------------------------------------- #
+if [ "$is_donor" = 1 ]; then
+    mkdir -p "$DONOR"
+    LOG="$DONOR/stub.log"
+    now() { date +%s; }
+    in_container=0
+    if [ -e /run/pressure-vessel ] || [ -n "${PRESSURE_VESSEL_RUNTIME:-}${container:-}" ] \
+        || [ -e /.flatpak-info ]; then
+        in_container=1
+    fi
+    {
+        ver="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$APPDIR/rpt_anywhere/__init__.py" 2>/dev/null)"
+        echo "=== $(date)  RPT Anywhere ${ver:-?} (donor placeholder)  pid=$$  container=$in_container"
+        echo "SteamAppId=${SteamAppId:-} SteamGameId=${SteamGameId:-}"
+        echo "args: $*"
+    } >"$LOG"
+
+    rm -f "$DONOR/stop"
+    env -0 >"$DONOR/env.tmp" && mv -f "$DONOR/env.tmp" "$DONOR/env"
+    echo "$$" >"$DONOR/pid"
+    now >"$DONOR/stub.alive"
+
+    host_fresh() {  # GUI heartbeat younger than $1 seconds?
+        [ -f "$DONOR/host.alive" ] || return 1
+        local t; t="$(cat "$DONOR/host.alive" 2>/dev/null)"
+        [ -n "$t" ] && [ $(( $(now) - t )) -lt "$1" ]
+    }
+
+    # GUI not running yet? Outside a container we start it ourselves.
+    if ! host_fresh 6; then
+        if [ "$in_container" = 0 ]; then
+            echo "starting GUI" >>"$LOG"
+            (
+                unset SteamAppId SteamGameId SteamOverlayGameId LD_PRELOAD
+                if [ -n "${SYSTEM_LD_LIBRARY_PATH+x}" ]; then
+                    export LD_LIBRARY_PATH="$SYSTEM_LD_LIBRARY_PATH"
+                else
+                    unset LD_LIBRARY_PATH
+                fi
+                [ -n "${SYSTEM_PATH:-}" ] && export PATH="$SYSTEM_PATH"
+                exec "$INVOKED" --gui </dev/null >>"$LOG" 2>&1
+            ) &
+        else
+            echo "inside container – waiting for the RPT Anywhere app" >>"$LOG"
+        fi
+    fi
+
+    # Preferred: Python agent (stdlib only) inside the Steam process. It starts games
+    # as children of Steam and talks to the Steam API (invites/guest links).
+    PYA="$(command -v python3 2>/dev/null)"
+    if [ -n "$PYA" ]; then
+        export RPTA_GAME_LD_PRELOAD="${LD_PRELOAD:-}"
+        export RPTA_GAME_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+        export RPTA_GAME_PATH="$PATH"
+        export RPTA_IN_CONTAINER="$in_container"
+        echo "starting agent with $PYA ($("$PYA" -V 2>&1))" >>"$LOG"
+        (
+            unset LD_PRELOAD
+            if [ "$in_container" = 0 ]; then
+                if [ -n "${SYSTEM_LD_LIBRARY_PATH+x}" ]; then
+                    export LD_LIBRARY_PATH="$SYSTEM_LD_LIBRARY_PATH"
+                else
+                    unset LD_LIBRARY_PATH
+                fi
+            fi
+            exec "$PYA" -I -c 'import sys; sys.path.insert(0, sys.argv[1]); sys.dont_write_bytecode = True
+from rpt_anywhere.agent import main; sys.exit(main())' "$APPDIR"
+        ) 2>>"$LOG"
+        rc=$?
+        echo "agent exited (rc=$rc)" >>"$LOG"
+        if [ "$rc" = 0 ]; then
+            rm -f "$DONOR/env" "$DONOR/pid" "$DONOR/stub.alive" "$DONOR/stop"
+            exit 0
+        fi
+        echo "agent failed – fallback mode without agent" >>"$LOG"
+    else
+        echo "no python3 – fallback mode without agent" >>"$LOG"
+    fi
+
+    seen=0
+    started="$(now)"
+    while :; do
+        now >"$DONOR/stub.alive"
+        [ -e "$DONOR/stop" ] && { echo "stop requested" >>"$LOG"; break; }
+        if host_fresh 15; then
+            seen=1
+        elif [ "$seen" = 1 ]; then
+            echo "app closed – session ends" >>"$LOG"; break
+        elif [ $(( $(now) - started )) -gt 600 ]; then
+            echo "app did not start within 10 min" >>"$LOG"; break
+        fi
+        sleep 1
+    done
+    rm -f "$DONOR/env" "$DONOR/pid" "$DONOR/stub.alive" "$DONOR/stop"
+    exit 0
+fi
+
+# --------------------------------------------------------------------------- #
+#  GUI / CLI
+# --------------------------------------------------------------------------- #
+unset LD_PRELOAD SteamAppId SteamGameId SteamOverlayGameId
+if [ -n "${SYSTEM_LD_LIBRARY_PATH+x}" ]; then
+    export LD_LIBRARY_PATH="$SYSTEM_LD_LIBRARY_PATH"
+fi
+[ -n "${SYSTEM_PATH:-}" ] && export PATH="$SYSTEM_PATH"
+export RPTA_LAUNCHER="$INVOKED"
+
+PY="$APPDIR/.venv/bin/python3"
+[ -x "$PY" ] || PY="$(command -v python3)"
+export PYTHONPATH="$APPDIR${PYTHONPATH:+:$PYTHONPATH}"
+
+args=()
+for a in "$@"; do [ "$a" = "--gui" ] || args+=("$a"); done
+
+case " $* " in
+    *" --list "*|*" --print-launch-option "*|*" --diagnose "*|*" --reset "*|*" --repair-steam-config "*|*" --version "*|*" -h "*|*" --help "*)
+        exec "$PY" -m rpt_anywhere "${args[@]}";;
+esac
+mkdir -p "$CACHE"
+if [ -t 1 ]; then
+    exec "$PY" -m rpt_anywhere "${args[@]}"
+else
+    exec "$PY" -m rpt_anywhere "${args[@]}" >>"$CACHE/rpt-anywhere.log" 2>&1
+fi
