@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:      # Actions → Release → "Run workflow": releases the version in __init__.py
 
 permissions:
   contents: write
@@ -15,11 +16,12 @@ jobs:
 
       - name: Check version
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
           CODE=$(python3 -c "import re;print(re.search(r'__version__ = \"(.+?)\"', open('rpt_anywhere/__init__.py').read()).group(1))")
-          echo "tag=$TAG code=$CODE"
-          test "$TAG" = "$CODE"
-          echo "VERSION=$TAG" >> "$GITHUB_ENV"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME#v} code=$CODE"
+            test "${GITHUB_REF_NAME#v}" = "$CODE"
+          fi
+          echo "VERSION=$CODE" >> "$GITHUB_ENV"
 
       - name: Checks
         run: |
@@ -46,6 +48,8 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
           name: RPT Anywhere ${{ env.VERSION }}
           body_path: notes.md
           files: |
