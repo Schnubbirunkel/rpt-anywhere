@@ -578,6 +578,30 @@ _SKIP_EXE = re.compile(
     r"server|dedicated|autorun|benchmark|config|settings|editor|sdk|tool)", re.I)
 
 
+def has_steam_drm(exe) -> bool:
+    """True if a Windows .exe is wrapped with Steam's DRM (SteamStub, PE section ".bind").
+    Such games refuse to start unless Steam launched exactly that app
+    ("Application load error V:0000065432")."""
+    import struct
+    try:
+        with open(exe, "rb") as f:
+            head = f.read(0x40)
+            if len(head) < 0x40 or head[:2] != b"MZ":
+                return False
+            pe = struct.unpack_from("<I", head, 0x3C)[0]
+            f.seek(pe)
+            hdr = f.read(24)
+            if len(hdr) < 24 or hdr[:4] != b"PE\0\0":
+                return False
+            nsec, = struct.unpack_from("<H", hdr, 6)
+            optsize, = struct.unpack_from("<H", hdr, 20)
+            f.seek(pe + 24 + optsize)
+            table = f.read(40 * min(nsec, 96))
+    except OSError:
+        return False
+    return any(table[i:i + 8].rstrip(b"\0") == b".bind" for i in range(0, len(table) - 39, 40))
+
+
 def _is_elf_exec(p: Path) -> bool:
     try:
         if not os.access(p, os.X_OK) or not p.is_file():

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.4] – 2026-11-20
+
+### Added
+- Windows games protected by Steam's DRM (SteamStub) are detected before launch. Instead of Steam's cryptic “Application load error V:0000065432”, the app explains that such games only start when Steam launches them directly and cannot run through a donor.
+
 ## [0.4.3] – 2026-11-20
 
 ### Fixed

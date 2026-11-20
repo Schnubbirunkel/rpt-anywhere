@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import PREFIX_DIR, Game
-from .steam_lib import Steam, find_game_executable, resolve_ci
+from .steam_lib import Steam, find_game_executable, has_steam_drm, resolve_ci
 from .i18n import _
 
 
@@ -130,6 +130,9 @@ def plan(game: Game, steam: Steam, default_proton: str = "", donor: dict | None 
     cwd = cwd or str(Path(exe).parent)
     if cwd and not os.path.isdir(cwd):
         cwd = resolve_ci("/", cwd) or str(Path(exe).parent)
+
+    if exe.lower().endswith(".exe") and has_steam_drm(exe):
+        raise LaunchError(_('»{name}« ist mit Steams Kopierschutz (SteamStub) versehen und startet nur, wenn Steam genau dieses Spiel startet – nicht über einen Donor. Steam würde mit „Application load error V:0000065432“ abbrechen.').format(name=game.name))
 
     if runner == "native":
         argv = [exe, *args]

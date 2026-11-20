@@ -348,5 +348,6 @@
  "ja": "yes",
  "nein": "no",
  "{tool} braucht die Steam Linux Runtime ({appid}), die nicht gefunden wurde – Proton startet ohne sie.": "{tool} needs the Steam Linux Runtime ({appid}), which was not found – Proton starts without it.",
- "  {name}: Steam Linux Runtime {appid} → {ep}": "  {name}: Steam Linux Runtime {appid} → {ep}"
+ "  {name}: Steam Linux Runtime {appid} → {ep}": "  {name}: Steam Linux Runtime {appid} → {ep}",
+ "»{name}« ist mit Steams Kopierschutz (SteamStub) versehen und startet nur, wenn Steam genau dieses Spiel startet – nicht über einen Donor. Steam würde mit „Application load error V:0000065432“ abbrechen.": "»{name}« uses Steam's DRM (SteamStub) and only starts when Steam launches exactly this game – not through a donor. Steam would abort with “Application load error V:0000065432”."
 }
