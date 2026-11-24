@@ -44,6 +44,8 @@ def diagnose(cfg) -> int:
     print(_('RPT Anywhere {version__}').format(version__=__version__))
     s = Steam(cfg.steam_root or None)
     print(_('Steam-Ordner: {root}  (ok={ok}, flatpak={is_flatpak}, läuft={v3})').format(root=s.root, ok=s.ok, is_flatpak=s.is_flatpak, v3=s.is_running()))
+    branch = s.client_branch()
+    print(_('Steam-Client: {branch}').format(branch=_('Beta ({name})').format(name=branch) if branch else _('stabil')))
     pw = s.pipewire_capture()
     print(_('Steam-Startparameter: {args}  | PipeWire-Desktopaufnahme: {pw}').format(
         args=" ".join((s.launch_args() or [])[1:]) or "-",

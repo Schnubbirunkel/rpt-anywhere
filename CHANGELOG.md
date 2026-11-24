@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.11] – 2026-11-24
+
+### Added
+- `--diagnose` shows whether the Steam client runs the stable or a beta branch. New Steam data formats (sharded appinfo, `appid_…` placeholder names) usually appear in the beta first; the app supports both.
+
 ## [0.4.10] – 2026-11-20
 
 ### Fixed

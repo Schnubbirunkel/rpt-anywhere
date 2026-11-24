@@ -365,5 +365,8 @@
  "Steam hat die Anfrage abgelehnt – läuft das Spiel mit AppID {appid}?": "Steam rejected the request – is the game with AppID {appid} running?",
  "Einladung an {sid} gesendet.": "Invite sent to {sid}.",
  "Gast-Link: {link}": "Guest link: {link}",
- "»{name}« hat sich bei Steam mit eigener AppID {other} angemeldet (statt {donor}). Steam ordnet sein Bild deshalb nicht dem Donor zu – Gäste sehen nur „Bitte warten“. Mit dem Donor-Weg lässt sich dieses Spiel nicht streamen.": "»{name}« signed in to Steam with its own AppID {other} (instead of {donor}). Steam therefore does not assign its picture to the donor – guests only see “Please wait”. This game cannot be streamed through a donor."
+ "»{name}« hat sich bei Steam mit eigener AppID {other} angemeldet (statt {donor}). Steam ordnet sein Bild deshalb nicht dem Donor zu – Gäste sehen nur „Bitte warten“. Mit dem Donor-Weg lässt sich dieses Spiel nicht streamen.": "»{name}« signed in to Steam with its own AppID {other} (instead of {donor}). Steam therefore does not assign its picture to the donor – guests only see “Please wait”. This game cannot be streamed through a donor.",
+ "Steam-Client: {branch}": "Steam client: {branch}",
+ "Beta ({name})": "beta ({name})",
+ "stabil": "stable"
 }

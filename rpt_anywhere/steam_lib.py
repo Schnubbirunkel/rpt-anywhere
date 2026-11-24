@@ -467,6 +467,15 @@ class Steam:
         return f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"
 
     # ---------------------------------------------------------------- process
+    def client_branch(self) -> str:
+        """Steam client branch: "" for stable, else the beta name (e.g. "publicbeta")."""
+        if not self.root:
+            return ""
+        try:
+            return (self.root / "package" / "beta").read_text().strip()
+        except OSError:
+            return ""
+
     def launch_args(self) -> list[str] | None:
         """Command line of the running Steam client (None if not found)."""
         pidfile = Path("~/.steam/steam.pid").expanduser()
