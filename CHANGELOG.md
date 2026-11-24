@@ -5,6 +5,9 @@
 ### Added
 - `--diagnose` shows whether the Steam client runs the stable or a beta branch. New Steam data formats (sharded appinfo, `appid_…` placeholder names) usually appear in the beta first; the app supports both.
 
+### Changed
+- Releases are published automatically: every push to `main` releases the version in `rpt_anywhere/__init__.py` as soon as it has no release yet (archive, checksum and screenshots attached).
+
 ## [0.4.10] – 2026-11-20
 
 ### Fixed

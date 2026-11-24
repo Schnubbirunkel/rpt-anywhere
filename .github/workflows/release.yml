@@ -2,8 +2,13 @@ name: Release
 
 on:
   push:
+    branches: [main]      # automatic: releases the version in __init__.py once it has no tag yet
     tags: ["v*"]
-  workflow_dispatch:      # Actions → Release → "Run workflow": releases the version in __init__.py
+  workflow_dispatch:      # manual: Actions → Release → "Run workflow"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -22,13 +27,22 @@ jobs:
             test "${GITHUB_REF_NAME#v}" = "$CODE"
           fi
           echo "VERSION=$CODE" >> "$GITHUB_ENV"
+          # on main: release only if this version has no release tag yet
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && git ls-remote --exit-code --tags origin "refs/tags/v$CODE" >/dev/null; then
+            echo "v$CODE is already released – nothing to do."
+            echo "RELEASE=false" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Checks
+        if: env.RELEASE == 'true'
         run: |
           python3 -m compileall -q rpt_anywhere
           python3 tools/i18n_check.py
 
       - name: Build archive
+        if: env.RELEASE == 'true'
         run: |
           NAME="rpt-anywhere-$VERSION"
           mkdir -p "dist/$NAME"
@@ -38,6 +52,7 @@ jobs:
           (cd dist && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 
       - name: Release notes from CHANGELOG
+        if: env.RELEASE == 'true'
         run: |
           awk -v v="$VERSION" '
             $0 ~ "^## \\[?" v "\\]?" {on=1; next}
@@ -47,6 +62,7 @@ jobs:
           cat notes.md
 
       - uses: softprops/action-gh-release@v2
+        if: env.RELEASE == 'true'
         with:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
@@ -55,3 +71,4 @@ jobs:
           files: |
             dist/rpt-anywhere-${{ env.VERSION }}.tar.gz
             dist/rpt-anywhere-${{ env.VERSION }}.tar.gz.sha256
+            docs/screenshots/*.png
