@@ -4,15 +4,18 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
+from PySide6.QtCore import QPoint, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtWidgets import (QMessageBox, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from .. import config as cfgmod
+from .. import rpw as rpwmod
+from ..log import log
 from ..steam_lib import Steam, libsteam_api_score
 from . import style as S
 from .widgets import Dot, FlowLayout, FriendRow, GameCard, divider, label
@@ -176,6 +179,8 @@ class SessionPanel(QWidget):
     invite = Signal(object)
     guest_link = Signal()
     open_overlay = Signal()
+    guest_input = Signal(str, bool, bool, bool)   # key, keyboard, mouse, controller
+    guest_remove = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -338,6 +343,31 @@ class SessionPanel(QWidget):
             r.addWidget(label(s["name"]), 1)
             r.addWidget(label(s.get("device", ""), "Small"))
             fv.addLayout(r)
+            if s.get("key"):
+                key = s["key"]
+                kick = QPushButton(_('Entfernen'))
+                kick.setObjectName("Danger")
+                kick.setToolTip(_('Gast trennen'))
+                kick.clicked.connect(lambda _c=False, key=key: self.guest_remove.emit(key))
+                r.addWidget(kick)
+                c = QHBoxLayout()
+                c.setSpacing(10)
+                toggles = {}
+                for attr, text in (("keyboard", _('Tastatur')), ("mouse", _('Maus')),
+                                   ("controller", _('Controller'))):
+                    b = QCheckBox(text)
+                    b.setChecked(bool(s.get(attr, True)))
+                    b.setToolTip(_('{what} für diesen Gast erlauben').format(what=text))
+                    toggles[attr] = b
+                    c.addWidget(b)
+
+                def emit(_checked=False, key=key, t=toggles):
+                    self.guest_input.emit(key, t["keyboard"].isChecked(), t["mouse"].isChecked(),
+                                          t["controller"].isChecked())
+                for b in toggles.values():
+                    b.toggled.connect(emit)
+                c.addStretch(1)
+                fv.addLayout(c)
             self.players.addWidget(f)
 
     def show_link(self, url: str):
@@ -351,6 +381,7 @@ class SetupPage(QWidget):
     changed = Signal()
     toast = Signal(str, str)
     test_donor = Signal()
+    rpw_changed = Signal()          # new/updated AppImage: restart the engine
 
     def __init__(self, cfg: cfgmod.Config, steam: Steam, parent=None):
         super().__init__(parent)
@@ -362,11 +393,59 @@ class SetupPage(QWidget):
         v.setSpacing(16)
         v.addWidget(label(_('Einrichtung'), "H1"))
         v.addWidget(label(
-            _('Steam erlaubt Remote Play Together nur für Spiele, die es selbst gestartet hat. Der Trick: Du leihst dir ein installiertes Steam-Spiel mit Remote-Play-Together-Unterstützung als <b>Donor</b>. Steam startet statt des Spiels diese App – und alles, was du von hier startest, streamt Steam als dieses Spiel. Am Donor-Spiel selbst wird nichts verändert, nur seine Startoptionen.'), "Muted", wrap=True))
+            _('<b>Steam-Spiele</b> startet Steam ganz normal – mit Kopierschutz, Mods und Startoptionen. Die Remote-Play-Together-Session für das laufende Spiel eröffnet <b>Remote Play Whatever</b> im Hintergrund, auch für Spiele, die es offiziell nicht unterstützen. <b>Spiele außerhalb von Steam</b> und die <b>Bildschirmfreigabe</b> startet Steam über eine eigene Nicht-Steam-Verknüpfung (Teil B) – ein Donor-Spiel ist nicht mehr nötig.'), "Muted", wrap=True))
+
+        # ---- RPW
+        ca, va = card()
+        va.addWidget(label(_('A · Remote Play Whatever (für Steam-Spiele)'), "H2"))
+        va.addWidget(label(_('Ein freies Open-Source-Werkzeug (MIT), das über Steams eigene interne Funktionen eine Remote-Play-Together-Session für das laufende Spiel eröffnet. Die App lädt es herunter und steuert es im Hintergrund. Nach Steam-Updates hier aktualisieren.'), "Small", wrap=True))
+        self.rpw_state = label("", "Small", wrap=True)
+        self.rpw_state.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        va.addWidget(self.rpw_state)
+        ra = QHBoxLayout()
+        self.rpw_dl = QPushButton(_('Herunterladen'))
+        self.rpw_dl.setObjectName("Primary")
+        self.rpw_dl.clicked.connect(self._rpw_download)
+        rpick = QPushButton(_('Datei wählen …'))
+        rpick.clicked.connect(self._rpw_pick)
+        rweb = QPushButton(_('Projektseite'))
+        rweb.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(rpwmod.HOMEPAGE)))
+        ra.addWidget(self.rpw_dl)
+        ra.addWidget(rpick)
+        ra.addWidget(rweb)
+        ra.addStretch(1)
+        va.addLayout(ra)
+        v.addWidget(ca)
+        self._dl = None
+
+        # ---- own shortcut (external games + screen sharing)
+        cb, vb = card()
+        vb.addWidget(label(_('B · Spiele außerhalb von Steam und Bildschirm teilen'), "H2"))
+        vb.addWidget(label(_('Wie bei Remote Play Whatever startet Steam diese Spiele als Nicht-Steam-Spiel: über die Verknüpfung <b>»RPT Anywhere«</b>, die hier einmalig in Steam angelegt wird. Steam startet dann diese App, und sie startet dein Spiel – mit Overlay, als echtes von Steam gestartetes Spiel. Läuft darüber kein Spiel, teilt Steam deinen ganzen Bildschirm (»Bildschirm teilen«, z. B. für Spiele aus anderen Launchern). Steam wird zum Anlegen kurz beendet; deine anderen Verknüpfungen bleiben unverändert, vorher wird eine Sicherung angelegt.'), "Small", wrap=True))
+        self.sc_state = label("", "Small", wrap=True)
+        vb.addWidget(self.sc_state)
+        rb = QHBoxLayout()
+        self.sc_btn = QPushButton(_('Verknüpfung in Steam anlegen'))
+        self.sc_btn.setObjectName("Primary")
+        self.sc_btn.clicked.connect(self._create_shortcut)
+        rb.addWidget(self.sc_btn)
+        rb.addStretch(1)
+        vb.addLayout(rb)
+        v.addWidget(cb)
+
+        # ---- old way: donor game (only with Remote Play Whatever switched off)
+        self.legacy = QWidget()
+        v_outer = v
+        v = QVBoxLayout(self.legacy)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(16)
+        v_outer.addWidget(self.legacy)
+        v.addWidget(label(_('Donor-Spiel (alter Weg)'), "H2"))
+        v.addWidget(label(_('Remote Play Whatever ist in den Einstellungen ausgeschaltet. Dann laufen alle Spiele über ein installiertes Steam-Spiel mit Remote-Play-Together-Unterstützung als <b>Donor</b>: Steam startet statt des Spiels diese App, und alles, was du von hier startest, streamt Steam als dieses Spiel. Am Donor-Spiel selbst wird nichts verändert, nur seine Startoptionen.'), "Small", wrap=True))
 
         # ---- step 1
         c1, v1 = card()
-        v1.addWidget(label(_('① Donor-Spiel wählen'), "H2"))
+        v1.addWidget(label(_('B1 · Donor-Spiel wählen'), "H2"))
         v1.addWidget(label(_('Spiele mit dem Abzeichen »RPT ✓« unterstützen Remote Play Together laut Steam-Store. Am besten ein kleines Spiel, das du sonst nicht spielst – solange es als Donor eingerichtet ist, startet es nicht mehr selbst.'), "Small", wrap=True))
         self.donor_search = QLineEdit()
         self.donor_search.setPlaceholderText(_('Installierte Spiele durchsuchen …'))
@@ -386,7 +465,7 @@ class SetupPage(QWidget):
 
         # ---- step 2
         c2, v2 = card()
-        v2.addWidget(label(_('② Startoptionen des Donors setzen'), "H2"))
+        v2.addWidget(label(_('B2 · Startoptionen des Donors setzen'), "H2"))
         v2.addWidget(label(_('In Steam: Rechtsklick aufs Donor-Spiel → Eigenschaften → Startoptionen, und diese Zeile einfügen:'), "Small", wrap=True))
         self.opts = QLineEdit()
         self.opts.setObjectName("Mono")
@@ -411,7 +490,7 @@ class SetupPage(QWidget):
 
         # ---- step 3
         c3, v3 = card()
-        v3.addWidget(label(_('③ Einladen aus der App (optional)'), "H2"))
+        v3.addWidget(label(_('B3 · Einladen aus der App (optional)'), "H2"))
         v3.addWidget(label(_('Für Freundesliste und Gast-Links braucht die App eine libsteam_api.so (64-bit). Viele installierte Spiele bringen sie mit – sie wird automatisch gesucht. Ohne sie lädst du wie gewohnt über das Steam-Overlay (Shift+Tab) ein.'), "Small", wrap=True))
         self.lib_state = label("", "Small", wrap=True)
         v3.addWidget(self.lib_state)
@@ -428,7 +507,7 @@ class SetupPage(QWidget):
 
         # ---- step 4
         c4, v4 = card()
-        v4.addWidget(label(_('④ Loslegen'), "H2"))
+        v4.addWidget(label(_('B4 · Loslegen'), "H2"))
         v4.addWidget(label(_('Starte ein Spiel aus der Bibliothek – die App lässt Steam das Donor-Spiel starten, verbindet sich damit und startet dein Spiel. Hast du die Startoption gerade erst gesetzt, starte Steam einmal neu. Klappt etwas nicht, sieh im Reiter »Logs« unter »Donor-Platzhalter« nach.'), "Small", wrap=True))
         t = QPushButton(_('Donor jetzt über Steam starten'))
         t.setObjectName("Primary")
@@ -438,6 +517,7 @@ class SetupPage(QWidget):
         r4.addStretch(1)
         v4.addLayout(r4)
         v.addWidget(c4)
+        v = v_outer
         v.addStretch(1)
 
         lay = QVBoxLayout(self)
@@ -494,8 +574,21 @@ class SetupPage(QWidget):
         self.refresh_state()
         self.changed.emit()
 
+    def set_rpw(self, rpw):
+        self.rpw = rpw
+
     def refresh_state(self):
         cfg = self.cfg
+        self._refresh_rpw()
+        self.legacy.setVisible(not cfg.use_rpw)
+        sc = self.steam.own_shortcut() if self.steam.ok else None
+        if sc:
+            self.sc_state.setText(_("<span style='color:{OK}'>✓ Verknüpfung »{name}« ist in Steam angelegt.</span>").format(OK=S.OK, name=sc.name))
+        elif getattr(self, "_sc_busy", False):
+            pass
+        else:
+            self.sc_state.setText(_('Noch nicht angelegt.'))
+        self.sc_btn.setVisible(not sc)
         self.opts.setText(donor_launch_options())
         if cfg.donor_appid:
             self.donor_sel.setText(_('Gewählt: <b>{donor_name}</b> (AppID {donor_appid})').format(donor_name=cfg.donor_name, donor_appid=cfg.donor_appid))
@@ -521,6 +614,121 @@ class SetupPage(QWidget):
             self.lib_state.setText(_("<span style='color:{OK}'>✓</span> {lib}").format(OK=S.OK, lib=lib))
         else:
             self.lib_state.setText(_('Noch keine libsteam_api.so gewählt.'))
+
+    def _refresh_rpw(self):
+        path = rpwmod.find_appimage(self.cfg.rpw_path)
+        rpw = getattr(self, "rpw", None)
+        if self._dl:
+            return
+        if not path:
+            self.rpw_state.setText(_('Noch nicht vorhanden – klick auf »Herunterladen« (von GitHub).'))
+            self.rpw_dl.setText(_('Herunterladen'))
+            return
+        rel = rpwmod.installed_release() if path == rpwmod.managed_path() else {}
+        ver = f" ({rel.get('tag')})" if rel.get("tag") else ""
+        if not self.cfg.use_rpw:
+            st = _("<span style='color:{WARN}'>In den Einstellungen ausgeschaltet.</span>").format(WARN=S.WARN)
+        elif rpw and rpw.is_ready:
+            st = _("<span style='color:{OK}'>✓ Verbunden mit Steam als {me}.</span>").format(OK=S.OK, me=rpw.me)
+        elif rpw and rpw.last_error:
+            st = _("<span style='color:{ERR}'>Fehler:</span> {err}").format(ERR=S.ERR, err=rpw.last_error)
+        else:
+            st = _('Wartet auf Steam …')
+        self.rpw_state.setText(f"{_short(path)}{ver}<br>{st}")
+        self.rpw_dl.setText(_('Aktualisieren') if path == rpwmod.managed_path() else _('Eigene Kopie herunterladen'))
+
+    def _create_shortcut(self):
+        if QMessageBox.question(self, _('Verknüpfung anlegen'), _('Steam wird dafür kurz beendet und danach wieder gestartet. Fortfahren?')) != QMessageBox.Yes:
+            return
+        self._sc_busy = True
+        self.sc_btn.setEnabled(False)
+        if self.steam.is_running():
+            self.sc_state.setText(_('Beende Steam …'))
+            try:
+                subprocess.Popen(["steam", "-shutdown"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass
+        self._sc_wait = 0
+        QTimer.singleShot(1000, self._create_shortcut_step)
+
+    def _create_shortcut_step(self):
+        if self.steam.is_running():
+            self._sc_wait += 1
+            if self._sc_wait < 60:
+                QTimer.singleShot(1000, self._create_shortcut_step)
+                return
+            self._sc_busy = False
+            self.sc_btn.setEnabled(True)
+            self.toast.emit(_('Steam hat sich nicht beendet – bitte Steam schließen und erneut versuchen.'), "err")
+            self.refresh_state()
+            return
+        time.sleep(1.0)        # let Steam finish writing its files
+        try:
+            appid = self.steam.add_own_shortcut(launcher_path())
+        except Exception as e:
+            self._sc_busy = False
+            self.sc_btn.setEnabled(True)
+            self.toast.emit(_('Verknüpfung konnte nicht angelegt werden: {e}').format(e=e), "err")
+            self.refresh_state()
+            return
+        log.info(_('Steam-Verknüpfung »RPT Anywhere« angelegt (AppID %s)'), appid)
+        self.sc_state.setText(_('Starte Steam …'))
+        try:
+            self.steam.open_url("steam://open/library")
+        except Exception:
+            pass
+        self._sc_busy = False
+        self.sc_btn.setEnabled(True)
+        self.toast.emit(_('Verknüpfung »RPT Anywhere« angelegt ✓'), "ok")
+        self.changed.emit()
+        self.refresh_state()
+
+    def _rpw_download(self):
+        if self._dl:
+            return
+        self._dl = rpwmod.Downloader(self)
+        self.rpw_dl.setEnabled(False)
+        self.rpw_state.setText(_('Lade herunter …'))
+
+        def prog(done, total):
+            self.rpw_state.setText(_('Lade herunter … {mb:.1f} MB').format(mb=done / 1e6) +
+                                   (f" / {total / 1e6:.1f} MB" if total else ""))
+
+        def ok(path):
+            self._dl = None
+            self.rpw_dl.setEnabled(True)
+            if self.cfg.rpw_path and Path(self.cfg.rpw_path) != Path(path):
+                self.cfg.rpw_path = ""
+                self.cfg.save()
+            self.toast.emit(_('Remote Play Whatever installiert ✓'), "ok")
+            self.rpw_changed.emit()
+            self.refresh_state()
+
+        def fail(err):
+            self._dl = None
+            self.rpw_dl.setEnabled(True)
+            self.toast.emit(_('Download fehlgeschlagen: {err}').format(err=err), "err")
+            self.refresh_state()
+        self._dl.progress.connect(prog)
+        self._dl.finished_ok.connect(ok)
+        self._dl.failed.connect(fail)
+        self._dl.start()
+
+    def _rpw_pick(self):
+        f, _sel = QFileDialog.getOpenFileName(self, _('RemotePlayWhatever-AppImage wählen'),
+                                              str(Path.home()), "AppImage (*.AppImage);;* (*)")
+        if not f:
+            return
+        p = Path(f)
+        try:
+            p.chmod(p.stat().st_mode | 0o111)
+        except OSError:
+            pass
+        self.cfg.rpw_path = str(p)
+        self.cfg.save()
+        self.rpw_changed.emit()
+        self.refresh_state()
 
     # -------------------------------------------------------------- actions
     def _copy(self):
@@ -601,6 +809,11 @@ class SettingsPage(QWidget):
         self.show_steam.setChecked(cfg.show_steam_games)
         self.show_steam.toggled.connect(self._save)
         cv.addWidget(self.show_steam)
+        self.use_rpw = QCheckBox(_('Steam-Spiele direkt über Steam starten (Remote Play Whatever, empfohlen)'))
+        self.use_rpw.setToolTip(_('Aus: auch Steam-Spiele laufen über das Donor-Spiel (alter Weg).'))
+        self.use_rpw.setChecked(cfg.use_rpw)
+        self.use_rpw.toggled.connect(self._save)
+        cv.addWidget(self.use_rpw)
         self.auto_overlay = QCheckBox(_('Nach Spielstart automatisch das Remote-Play-Together-Fenster im Overlay öffnen'))
         self.auto_overlay.setChecked(cfg.auto_open_rpt_overlay)
         self.auto_overlay.toggled.connect(self._save)
@@ -646,7 +859,7 @@ class SettingsPage(QWidget):
 
         c, cv = card()
         cv.addWidget(label(_('Fehlerbehebung'), "H2"))
-        cv.addWidget(label(_('Startet Steam dein Donor-Spiel von selbst oder hängt eine Session? Der Notaus beendet die Remote-Play-Session, den Agent im Steam-Prozess und das zuletzt gestartete Spiel. Im Terminal: rpt-anywhere --reset'),
+        cv.addWidget(label(_('Hängt eine Session, oder zeigt Steam ein Spiel weiter als laufend an? Der Notaus beendet die Remote-Play-Session, den Agent im Steam-Prozess und das zuletzt gestartete Spiel. Im Terminal: rpt-anywhere --reset'),
                            "Small", wrap=True))
         rb = QHBoxLayout()
         nb = QPushButton(_('Notaus: Session und Hintergrundprozesse beenden'))
@@ -683,12 +896,15 @@ class SettingsPage(QWidget):
 
     def _save(self, *_args):
         old_root, old_steam = self.cfg.steam_root, self.cfg.show_steam_games
+        old_rpw = self.cfg.use_rpw
         self.cfg.show_steam_games = self.show_steam.isChecked()
+        self.cfg.use_rpw = self.use_rpw.isChecked()
         self.cfg.auto_open_rpt_overlay = self.auto_overlay.isChecked()
         self.cfg.default_proton = self.proton.currentData() or ""
         self.cfg.steam_root = self.root.text().strip()
         self.cfg.save()
-        if (old_root, old_steam) != (self.cfg.steam_root, self.cfg.show_steam_games):
+        if (old_root, old_steam, old_rpw) != (self.cfg.steam_root, self.cfg.show_steam_games,
+                                               self.cfg.use_rpw):
             self.changed.emit()
 
 
@@ -771,7 +987,7 @@ class LogsPage(QWidget):
         c = cfgmod.CACHE_DIR
         out = [(_('App (Ereignisse)'), c / "app.log"),
                (_('App (Ausgabe / Abstürze)'), c / "rpt-anywhere.log"),
-               (_('Donor-Platzhalter (von Steam gestartet)'), c / "donor" / "stub.log")]
+               (_('Agent (von Steam gestartet)'), c / "donor" / "stub.log")]
         logs = c / "logs"
         if logs.is_dir():
             for p in sorted(logs.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True):

@@ -6,7 +6,7 @@
 
 **Steam Remote Play Together für _jedes_ Spiel unter Linux**
 
-Steam-Spiele ohne Remote-Play-Together-Unterstützung, Windows-Spiele von GOG/Epic/itch.io über Proton, native Linux-Spiele, Emulatoren oder beliebige Befehle – streame sie mit Steams Remote Play Together an deine Freunde, lade sie mit einem Klick ein oder schick einen Gast-Link.
+Steam-Spiele ohne Remote-Play-Together-Unterstützung – auch mit Kopierschutz, Mods oder eigener Steam-Anmeldung –, dazu Windows-Spiele von GOG/Epic/itch.io über Proton, native Linux-Spiele, Emulatoren oder beliebige Befehle: Streame sie mit Steams Remote Play Together an deine Freunde, lade sie mit einem Klick ein oder schick einen Gast-Link.
 
 [![Release](https://img.shields.io/github/v/release/Schnubbirunkel/rpt-anywhere)](https://github.com/Schnubbirunkel/rpt-anywhere/releases/latest)
 [![Lizenz: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
@@ -20,27 +20,34 @@ Steam-Spiele ohne Remote-Play-Together-Unterstützung, Windows-Spiele von GOG/Ep
 
 ## Funktionen
 
-- **Jedes Spiel** – Steam-Bibliothek, Windows-Spiele über Proton (auch GE-Proton), Wine, native Linux-Programme, AppImages, Emulatoren oder beliebige Shell-Befehle
-- **Einladen mit einem Klick** – Freundesliste mit Avataren und Online-Status, Gast-Links für Leute ohne Steam-Account (landen automatisch in der Zwischenablage), Liste der verbundenen Mitspieler
-- **Spiele wechseln, ohne dass jemand rausfliegt** – die Remote-Play-Session bleibt offen, wenn ein Spiel endet; einfach das nächste starten
+- **Jedes Steam-Spiel** – Steam startet das Spiel selbst (Kopierschutz, Mods und Startoptionen funktionieren); [Remote Play Whatever](https://github.com/Casual-Gamer8001/RemotePlayWhatever) eröffnet im Hintergrund die Remote-Play-Together-Session dafür, auch wenn das Spiel es offiziell nicht unterstützt
+- **Spiele außerhalb von Steam** – Windows-Spiele über Proton (auch GE-Proton), Wine, native Linux-Programme, AppImages, Emulatoren oder beliebige Shell-Befehle; Steam startet sie über die eigene Nicht-Steam-Verknüpfung von RPT Anywhere – ohne Donor-Spiel
+- **Bildschirm teilen** – für Spiele, die Steam nicht starten kann (andere Launcher): Steam teilt deinen ganzen Bildschirm
+- **Einladen mit einem Klick** – Freundesliste mit Online-Status, Gast-Links für Leute ohne Steam-Account (landen automatisch in der Zwischenablage), verbundene Mitspieler mit Schaltern für Tastatur/Maus/Controller pro Gast und Entfernen-Knopf
 - **Schöne Bibliothek** – Cover, Favoriten, Suche und Filter, Spiele per Drag & Drop hinzufügen, Import deiner Nicht-Steam-Verknüpfungen aus Steam
-- **Geführte Einrichtung** – zeigt, welche installierten Spiele Remote Play Together unterstützen und sich als Donor eignen, und trägt die Startoption auf Wunsch selbst ein (nur diese eine Zeile, mit Backup)
+- **Geführte Einrichtung** – lädt Remote Play Whatever herunter, aktualisiert es und legt die Steam-Verknüpfung an (deine anderen Verknüpfungen bleiben unverändert, mit Backup)
 - **Live-Logs** in der App, ein **Notaus** und ein **Diagnose**-Befehl für die Fehlersuche
 - Oberfläche auf **Englisch und Deutsch** (in den Einstellungen umschaltbar, weitere Sprachen willkommen)
-- Nutzt nur **offizielle Schnittstellen**: Steams Startoptionen und die öffentliche Steamworks-API – keine Eingriffe in den Steam-Client
 
 ## So funktioniert's
 
-Steam erlaubt Remote Play Together nur für Spiele, die es selbst gestartet hat und die es unterstützen. RPT Anywhere nutzt das **Donor-Prinzip** (wie [RemotePlayDetached](https://github.com/smaTc/RemotePlayDetached) und [cooplauncher](https://github.com/MBaliver/cooplauncher)):
+Steam bietet Remote Play Together nur für Spiele an, die es selbst gestartet hat und die es unterstützen. RPT Anywhere hat zwei Wege drumherum:
 
-1. Du wählst ein installiertes Steam-Spiel **mit** Remote-Play-Together-Unterstützung als *Donor* und setzt dessen Startoption auf RPT Anywhere.
-2. Startet Steam den Donor, startet es stattdessen den **Agent** von RPT Anywhere. Der braucht nur die Python-Standardbibliothek und läuft deshalb auch in Steams Runtime-Container (bei Proton-Spielen immer der Fall).
-3. Die App sagt dem Agent, was er starten soll. Der Agent startet dein Spiel **als echten Unterprozess von Steam** mit Steams eigener Umgebung (Overlay, AppID, Steam Input) – Steam streamt es also als Donor-Spiel. Einladungen, Gast-Links und die Freundesliste laufen ebenfalls über den Agent, mit der offiziellen `ISteamRemotePlay`-API.
+**Steam-Spiele – Steam + Remote Play Whatever (Standard).** Die App lässt Steam das Spiel ganz normal starten (`steam://rungameid/…`), Kopierschutz, Startoptionen und Mods verhalten sich also wie immer. Dann steuert sie [Remote Play Whatever](https://github.com/Casual-Gamer8001/RemotePlayWhatever) (RPW, MIT) in dessen fensterlosem `--serve`-Modus. RPW spricht über Steams eigene interne, undokumentierte Funktionen mit dem laufenden Steam-Client (`IClientRemoteClientManager`, über Namen aufgelöst, damit die meisten Steam-Updates es nicht kaputt machen) und legt Remote-Play-Together-Gruppe, Einladungen und Gast-Links **für die eigene AppID des Spiels** an. RPT Anywhere lädt RPW auf Wunsch herunter und lässt es im Hintergrund laufen.
+
+**Spiele außerhalb von Steam und Bildschirm teilen – Steam-Verknüpfung.** Wie RPWs *Play a program that isn't in Steam* und *Share my screen* laufen sie als Nicht-Steam-Spiel. RPW legt dafür über Steams interne Funktionen eine temporäre Verknüpfung an, was sein `--serve`-Modus nicht anbietet; RPT Anywhere legt deshalb **einmalig eine feste Nicht-Steam-Verknüpfung „RPT Anywhere“** in Steam an (Einrichtung, Teil B).
+
+1. Klickst du ein solches Spiel an, öffnet die App diese Verknüpfung (`steam://rungameid/…`). Steam startet damit den kleinen **Agent** von RPT Anywhere als echtes Nicht-Steam-Spiel, mit Overlay.
+2. Der Agent startet dein Spiel (Proton mit Steam Linux Runtime, Wine, nativ, Befehl) als Unterprozess, Steam streamt es also. Beim Spielwechsel fliegt niemand raus.
+3. Ohne Spiel wartet die Verknüpfung nur – Steam teilt dann deinen ganzen Bildschirm (*Bildschirm teilen*).
+
+Einladungen, Gast-Links und Gast-Steuerung laufen in beiden Fällen über RPW.
 
 ```
- RPT-Anywhere-App (GUI) ──Aufträge──▶ Agent (im Donor-Prozess von Steam) ──startet──▶ dein Spiel
-          ▲                                   │                                      │
-          └────── Status, Freunde, Gäste ◀────┘          Steam-Overlay + Stream ◀────┘
+ Steam-Spiel:       RPT Anywhere ──steam://rungameid/<AppID>──▶ Steam ──▶ Spiel (eigene AppID)
+ Anderes Spiel:     RPT Anywhere ──steam://rungameid/<Verknüpfung>──▶ Steam ──▶ Agent ──▶ dein Spiel
+ Bildschirm teilen: RPT Anywhere ──steam://rungameid/<Verknüpfung>──▶ Steam ──▶ Agent (wartet) → ganzer Bildschirm
+                    RPT Anywhere ──--serve──▶ Remote Play Whatever ──▶ Steam: RPT-Gruppe, Einladungen, Gast-Links
 ```
 
 ## Installation
@@ -63,48 +70,51 @@ Aus dem Quellcode: `git clone https://github.com/Schnubbirunkel/rpt-anywhere && 
 
 Die Sprache stellst du unter Settings → *Language / Sprache* auf Deutsch. Dann RPT Anywhere → **Einrichtung**:
 
-1. **Donor wählen.** Spiele mit **RPT ✓** unterstützen laut Steam-Store Remote Play Together. Am besten ein kleines Spiel, das du sonst nicht spielst – solange es Donor ist, startet es nicht mehr selbst.
-2. **Startoption setzen.** Entweder **Automatisch eintragen** (Steam muss beendet sein; es wird ein Backup von `localconfig.vdf` angelegt und nur diese eine Zeile geändert) oder in Steam → Rechtsklick auf den Donor → *Eigenschaften → Startoptionen* einfügen:
-   ```
-   "/home/DU/.local/bin/rpt-anywhere" --donor # %command%
-   ```
-   Danach Steam einmal neu starten, damit es die Option sicher übernimmt.
-3. **libsteam_api.so** (für Einladungen aus der App) wird automatisch in deinen installierten Spielen gesucht. Ohne sie lädst du wie gewohnt über das Steam-Overlay (Shift+Tab) ein.
+**A · Remote Play Whatever (Steam-Spiele).** Auf **Herunterladen** klicken – die App holt das Linux-AppImage aus den [RPW-Releases](https://github.com/Casual-Gamer8001/RemotePlayWhatever/releases) nach `~/.local/share/rpt-anywhere/` und startet es im Hintergrund. Ein selbst heruntergeladenes AppImage (z. B. in `~/Applications` oder `~/Downloads`) wird automatisch gefunden, oder du wählst es mit **Datei wählen**. Macht ein Steam-Update es kaputt, auf **Aktualisieren** klicken.
+
+**B · Steam-Verknüpfung (Spiele außerhalb von Steam, Bildschirm teilen).** Auf **Verknüpfung in Steam anlegen** klicken. Steam wird kurz beendet, die Verknüpfung „RPT Anywhere“ wird an deine `shortcuts.vdf` angehängt (deine anderen Verknüpfungen bleiben Byte für Byte erhalten, vorher wird eine Sicherung angelegt) und Steam wieder gestartet.
+
+![Einrichtung](docs/screenshots/02-setup-de.png)
 
 ## Benutzung
 
+- **Klick auf ein Steam-Spiel:** Steam startet es; sobald es läuft, kannst du einladen. Die Session gehört zu diesem Spiel, Steam zeigt es deinen Freunden also wie gewohnt an.
+- **Klick auf ein anderes Spiel:** Steam startet die Verknüpfung „RPT Anywhere“, die dein Spiel startet. Beim Spielwechsel bleiben alle verbunden.
+- **Bildschirm teilen** (rechter Bereich, wenn nichts läuft): für Spiele aus anderen Launchern – starte das Spiel wie gewohnt, Gäste sehen deinen Bildschirm.
+- **Einladen** im rechten Bereich: Freunde direkt einladen oder einen **Gast-Link erstellen**. Verbundene Mitspieler stehen unter *Mitspieler*; bei Steam-Spielen kannst du pro Gast Tastatur, Maus und Controller freigeben oder einen Gast entfernen.
 - **Spiele hinzufügen:** **＋ Spiel hinzufügen**, Datei ins Fenster ziehen oder **Steam-Verknüpfungen importieren**. Startarten: *Linux nativ*, *Proton* (eigener Prefix pro Spiel, Steam Linux Runtime wie bei Steam selbst), *Wine*, *Befehl / Skript*. Installierte Steam-Spiele erscheinen automatisch.
-- **Klick auf ein Spiel:** Ist die App noch nicht mit Steam verbunden, lässt sie Steam den Donor starten, verbindet sich mit dem Agent und startet dann dein Spiel.
-- **Einladen** im rechten Bereich: Freunde direkt einladen oder einen **Gast-Link erstellen**. Verbundene Mitspieler stehen unter *Mitspieler*.
 - **Rechtsklick auf ein Spiel:** bearbeiten, Favorit, Ordner öffnen, Log anzeigen, ausblenden.
+- Schaltest du Remote Play Whatever in den Einstellungen aus, läuft alles wie in früheren Versionen über ein Donor-Spiel.
 
 ### Kommandozeile
 
 ```
-rpt-anywhere --run "Name oder ID"    # Spiel starten (über Steam/Donor, falls nötig)
+rpt-anywhere --run "Name oder ID"    # Spiel starten (Steam-Spiele direkt, andere über die Verknüpfung)
 rpt-anywhere --run 413150            # Steam-Spiel per AppID
 rpt-anywhere --list                  # eigene Spiele auflisten
-rpt-anywhere --diagnose              # Steam-Erkennung prüfen: Bibliotheken, Startdateien, Proton, Donor
+rpt-anywhere --diagnose              # Steam-Erkennung prüfen: Bibliotheken, Startdateien, Proton
 rpt-anywhere --reset                 # Notaus: Session, Agent und letztes Spiel beenden
 rpt-anywhere --repair-steam-config   # localconfig.vdf aus der ersten Sicherung von RPT Anywhere wiederherstellen
-rpt-anywhere --print-launch-option   # Startoption für den Donor ausgeben
+rpt-anywhere --guest-link APPID      # Gast-Link über die öffentliche API für ein von Steam gestartetes Spiel (nur Spiele mit RPT)
 ```
 
 Die Ausgabe der Kommandozeile folgt der in der App eingestellten Sprache; mit `RPTA_LANG=de` lässt sie sich auch direkt wählen.
 
 ## Fehlersuche
 
-- **Beim Start des Donors passiert nichts / „Donor nicht verbunden“:** Nach dem Setzen der Startoption Steam einmal neu starten. Im Reiter *Logs* → *Donor-Platzhalter* steht, was Steam tatsächlich gestartet hat (Version, Container ja/nein).
-- **Steam zeigt den Donor weiter als laufend an:** Ein Prozess der letzten Session lebt noch. Notaus (Einstellungen oder Reiter Logs) oder `rpt-anywhere --reset`.
-- **Startdatei nicht gefunden:** `rpt-anywhere --diagnose` zeigt, welche Datei für jedes Spiel erkannt wurde. Die Startkonfiguration kommt aus Steams App-Cache (`appinfo.vdf` und das neuere aufgeteilte Format `appcache/appinfo/appinfo_XX.vdf`), sonst durchsucht die App den Spielordner. Im Bearbeiten-Dialog kannst du die Datei immer selbst angeben.
-- **Overlay fehlt im Spiel:** Programme, die im Steam-Container nicht sichtbar sind (z. B. `/usr/bin/…`, Wine), startet die App direkt auf dem System – dort kann das Overlay fehlen; die App weist dann darauf hin. Flatpak-/Snap-Apps laufen in einer eigenen Sandbox.
-- **Die Maus des Gasts reagiert träge:** Eingaben überträgt Steam selbst, nicht RPT Anywhere; die Stream-Statistik zeigt meist die Netzwerk-Latenz als Ursache. Am meisten helfen eine Kabelverbindung oder ein Gamepad für den Gast.
+- **„Remote Play Whatever passt nicht zu dieser Steam-Version“ / Einladungen scheitern nach einem Steam-Update:** Einrichtung → **Aktualisieren** holt das neueste RPW. RPW zielt auf den **stabilen** Steam-Client; mit dem Steam-Beta kann es zuerst kaputtgehen. `rpt-anywhere --diagnose` zeigt, welchen Zweig du nutzt.
+- **Gast sieht „Bitte warten“ oder „Host ist beschäftigt“:** Steam zeigt Gästen das Spiel nur, solange es bei dir im Vordergrund ist, und pausiert ihre Eingaben, während das Steam-Overlay offen ist. Spiel anklicken bzw. Overlay mit Shift+Tab schließen.
+- **Nach dem Klick auf ein Nicht-Steam-Spiel passiert nichts:** Nach dem Anlegen der Verknüpfung Steam einmal neu starten. Im Reiter *Logs* → *Agent (von Steam gestartet)* steht, was Steam tatsächlich gestartet hat.
+- **Steam zeigt „RPT Anywhere“ weiter als laufend an:** Ein Prozess der letzten Session lebt noch. Notaus (Einstellungen oder Reiter Logs) oder `rpt-anywhere --reset`.
+- **Startdatei nicht gefunden:** `rpt-anywhere --diagnose` zeigt, welche Datei für jedes Spiel erkannt wurde. Im Bearbeiten-Dialog kannst du die Datei immer selbst angeben.
+- **Die Maus des Gasts reagiert träge:** Eingaben überträgt Steam selbst; die Stream-Statistik zeigt meist die Netzwerk-Latenz als Ursache. Am meisten helfen eine Kabelverbindung oder ein Gamepad für den Gast.
 
 ## Grenzen
 
 - Das Spiel braucht **lokalen Mehrspielermodus** – Gäste kommen als (virtuelle) Controller bzw. Maus/Tastatur an, genau wie bei normalem Remote Play Together.
-- **Anti-Cheat und DRM-Launcher** (EA App, Ubisoft Connect, manche Steam-Spiele) können den Start auf diesem Weg verweigern. Bei Steam-Spielen hilft manchmal *Mit eigener Steam-AppID starten* im Bearbeiten-Dialog.
-- **Flatpak-Steam** führt alles in seiner Sandbox aus; am zuverlässigsten ist das native Steam-Paket deiner Distribution.
+- **Remote Play Whatever nutzt Steams interne Funktionen.** Ein Steam-Update kann es kaputt machen, bis RPW aktualisiert ist; RPW braucht glibc 2.35+ und X11/XWayland.
+- **Flatpak-Steam** hält seine Dateien in einer Sandbox; RPW und die Verknüpfung laufen am zuverlässigsten mit dem nativen Steam-Paket deiner Distribution.
+- **Anti-Cheat und DRM-Launcher** (EA App, Ubisoft Connect) können Eingaben der Gäste oder den Start außerhalb ihres Launchers weiterhin verweigern.
 
 ## Weitere Sprache hinzufügen
 
@@ -114,7 +124,7 @@ Die Ausgabe der Kommandozeile folgt der in der App eingestellten Sprache; mit `R
 
 ## Danke
 
-Inspiriert von [RemotePlayDetached](https://github.com/smaTc/RemotePlayDetached), [cooplauncher](https://github.com/MBaliver/cooplauncher) und [RemotePlayWhatever](https://github.com/m4dEngi/RemotePlayWhatever). Die Formatbeschreibung von [SteamAppInfo](https://github.com/ValveResourceFormat/SteamAppInfo) war sehr hilfreich.
+Steam-Spiele laufen über [Remote Play Whatever](https://github.com/Casual-Gamer8001/RemotePlayWhatever) von Casual-Gamer8001 (Fork von [m4dEngis RemotePlayWhatever](https://github.com/m4dEngi/RemotePlayWhatever), MIT); RPT Anywhere lädt und steuert es, liefert es aber nicht mit. Der Agent, der Spiele in einem von Steam gestarteten Prozess startet, ist inspiriert von [RemotePlayDetached](https://github.com/smaTc/RemotePlayDetached) und [cooplauncher](https://github.com/MBaliver/cooplauncher). Die Formatbeschreibung von [SteamAppInfo](https://github.com/ValveResourceFormat/SteamAppInfo) war sehr hilfreich.
 
 ## Lizenz
 

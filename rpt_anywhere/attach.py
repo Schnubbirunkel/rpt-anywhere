@@ -36,7 +36,7 @@ def attach(appid: int, steamid: int = 0, timeout: float = 15.0, out=print) -> in
     from .steamworks import Steamworks, SteamworksError
     lib = _find_lib()
     if not lib:
-        out(_('Keine libsteam_api.so gefunden (Einrichtung ③).'))
+        out(_('Keine libsteam_api.so gefunden (Einrichtung B3).'))
         return 2
     os.environ["SteamAppId"] = os.environ["SteamGameId"] = str(appid)
     os.environ.pop("SteamOverlayGameId", None)

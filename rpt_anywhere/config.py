@@ -70,6 +70,8 @@ class Config:
     only_rpt_hint_dismissed: bool = False
     auto_open_rpt_overlay: bool = False
     language: str = "en"
+    use_rpw: bool = True              # Steam games: start via Steam + Remote Play Whatever (no donor)
+    rpw_path: str = ""                # RemotePlayWhatever AppImage (empty: auto-detect)
     games: list[Game] = field(default_factory=list)
     steam_overrides: dict = field(default_factory=dict)   # appid(str) -> Game dict overrides
 

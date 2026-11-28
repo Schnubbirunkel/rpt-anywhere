@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0] – 2026-11-28
+
+### Added
+- **No donor game any more.** Works like [Remote Play Whatever](https://github.com/Casual-Gamer8001/RemotePlayWhatever) (RPW, MIT), which RPT Anywhere now drives in its window-less `--serve` mode:
+  - **Steam games** are started by Steam itself (DRM, launch options and mods work as usual). RPW opens the Remote Play Together session, invites and guest links **for the game's own AppID** – games with Steam DRM (e.g. Dave the Diver) or their own Steam sign-in (e.g. Nivalis Nights) work now.
+  - **Games outside Steam** run as a non-Steam game, like RPW's *Play a program that isn't in Steam*: Steam starts RPT Anywhere's own shortcut "RPT Anywhere", which starts the game (switching games keeps guests connected).
+  - **Share my screen**, like RPW's: Steam runs the shortcut without a game and shares the whole screen – for games from other launchers.
+- Setup page: download/update/pick the RPW AppImage (part A); create the Steam shortcut with one click (part B) – Steam is closed briefly, the entry is appended to `shortcuts.vdf`, your other shortcuts stay byte for byte, a backup is written first.
+- Players panel: per-guest switches for keyboard, mouse and controller, and a button to remove a guest.
+- Friends list from RPW, with avatars from Steam's local avatar cache.
+- Stopping a game Steam started ends its whole process tree (Steam's `reaper` for that AppID).
+
+### Changed
+- The donor game is only used when Remote Play Whatever is switched off in the settings (old way); its setup is hidden otherwise.
+- README: RPW uses Steam's internal, undocumented functions; the claim "only official interfaces" was removed. Log source "Donor placeholder" is now "Agent (started by Steam)".
+
 ## [0.4.11] – 2026-11-24
 
 ### Added

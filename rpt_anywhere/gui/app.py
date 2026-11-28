@@ -20,9 +20,10 @@ from ..config import Config, Game
 from ..donor_link import DonorLink
 from ..launcher import LaunchError, RunningGame, plan
 from ..steam_lib import Steam
+from .. import rpw as rpwmod
 from . import style as S
 from .dialogs import GameDialog, guess_runner
-from .images import CoverLoader, avatar_from_rgba
+from .images import CoverLoader, avatar_from_rgba, circle
 from .pages import LibraryPage, LogsPage, SessionPanel, SettingsPage, SetupPage
 from .widgets import Dot, Toast, label
 
@@ -68,6 +69,13 @@ class MainWindow(QMainWindow):
         self.covers.loaded.connect(self._cover_loaded)
         self.cover_keys: dict[str, list[str]] = {}
         self._waiting_since = 0.0
+        # Remote Play Whatever: Steam games run through Steam itself, no donor
+        self.rpw = rpwmod.RPW(self)
+        self.rpw_path = rpwmod.find_appimage(self.cfg.rpw_path)
+        self.steam_game: dict | None = None      # {"gid","appid","name","started"}
+        self._steam_game_alive = 0.0
+        self._guest_sig = None
+        self._rpw_friends_sig = None
 
         self.setWindowTitle(f"{cfgmod.APP_NAME} {__version__}")
         icon = ASSETS / "icon.svg"
@@ -94,6 +102,8 @@ class MainWindow(QMainWindow):
         self.setup.changed.connect(self._refresh_status)
         self.setup.toast.connect(self.toast)
         self.setup.test_donor.connect(self.start_donor)
+        self.setup.set_rpw(self.rpw)
+        self.setup.rpw_changed.connect(self._restart_rpw)
         self.settings = SettingsPage(self.cfg, self.steam)
         self.settings.changed.connect(self._settings_changed)
         self.settings.reset.connect(self.emergency_reset)
@@ -110,6 +120,17 @@ class MainWindow(QMainWindow):
         self.panel.invite.connect(self.invite_friend)
         self.panel.guest_link.connect(self.guest_link)
         self.panel.open_overlay.connect(self.open_overlay)
+        self.panel.guest_input.connect(self.rpw.set_input)
+        self.panel.guest_remove.connect(self._remove_guest)
+        self.rpw.ready.connect(self._rpw_ready)
+        self.rpw.status.connect(self._rpw_status)
+        self.rpw.friends.connect(self._rpw_friends)
+        self.rpw.invite.connect(self._rpw_invite)
+        self.rpw.joined.connect(lambda m: self.toast(_('{name} ist beigetreten 🎉').format(name=m.get("name") or _("Gast")), "ok"))
+        self.rpw.left.connect(lambda m: self.toast(_('{name} hat die Session verlassen').format(name=m.get("name") or _("Gast")), "info"))
+        self.rpw.notice.connect(lambda t: self.toast(t, "info"))
+        self.rpw.error.connect(self._rpw_error)
+        self.rpw.stopped.connect(lambda _e: self._refresh_status())
         h.addWidget(self.panel)
         self.setCentralWidget(root)
         self._toast = Toast(root)
@@ -118,9 +139,11 @@ class MainWindow(QMainWindow):
         self._monitor.start()
 
         self.scan_library()
+        self.start_rpw()
         self._refresh_status()
         self._poll_donor()
-        if not self.cfg.donor_appid:
+        if not self.rpw_path or (self.cfg.use_rpw and not self.donor_target()) \
+                or (not self.cfg.use_rpw and not self.cfg.donor_appid):
             QTimer.singleShot(300, lambda: self.go(1))
 
     # ================================================================ layout
@@ -170,7 +193,8 @@ class MainWindow(QMainWindow):
         dv = QVBoxLayout(self.donor_box)
         dv.setContentsMargins(14, 12, 14, 12)
         dv.setSpacing(4)
-        dv.addWidget(label(_('DONOR-SPIEL'), "SectionTitle"))
+        self.donor_title = label(_('DONOR-SPIEL'), "SectionTitle")
+        dv.addWidget(self.donor_title)
         row = QHBoxLayout()
         self.donor_dot = Dot(S.MUTED, 8)
         row.addWidget(self.donor_dot)
@@ -289,6 +313,9 @@ class MainWindow(QMainWindow):
         self.steam = Steam(self.cfg.steam_root or None)
         self.setup.steam = self.steam
         self.scan_library()
+        if self.rpw_wanted() != self.rpw.running:
+            self._restart_rpw()
+        self._refresh_status()
 
     # ================================================================ add/edit
     def add_game(self, path: str = ""):
@@ -410,14 +437,147 @@ class MainWindow(QMainWindow):
     def agent(self) -> dict | None:
         return self._agent_state if self.donor_mode == "agent" else None
 
-    def launch(self, g: Game):
-        if not self.donor_mode:
-            if not self.cfg.donor_appid:
-                self.go(1)
-                self.toast(_('Wähle zuerst ein Donor-Spiel.'), "warn")
+    # ---------------------------------------------------------------- RPW
+    def rpw_wanted(self) -> bool:
+        return bool(self.cfg.use_rpw and self.rpw_path)
+
+    def start_rpw(self):
+        self.rpw_path = rpwmod.find_appimage(self.cfg.rpw_path)
+        if self.rpw_wanted():
+            self.rpw.start(self.rpw_path)
+        elif self.rpw.running:
+            self.rpw.stop()
+
+    def _restart_rpw(self):
+        self.rpw.stop()
+        self.start_rpw()
+        self._refresh_status()
+
+    def via_steam(self, g: Game) -> bool:
+        """Steam games start through Steam itself (with RPW) unless an own program was set."""
+        return bool(self.rpw_wanted() and g.runner == "steam" and g.steam_appid and not g.exe)
+
+    def _rpw_ready(self, m: dict):
+        self.user_label.setText(_('Angemeldet als {v0}').format(v0=m.get("name", "")))
+        self._refresh_status()
+
+    def _rpw_error(self, m: dict):
+        if m.get("command") in ("link", "invite") and m.get("error") == "no-game":
+            self.toast(_('Starte zuerst ein Spiel über Steam bzw. die Bibliothek.'), "warn")
+        elif m.get("error") == "methods-missing":
+            self.toast(_('Remote Play Whatever passt nicht zu dieser Steam-Version – unter Einrichtung aktualisieren.'), "err")
+        elif m.get("message"):
+            self.toast(m["message"], "err")
+        self._refresh_status()
+
+    def _rpw_status(self, st: dict):
+        guests = st.get("guests") or []
+        sig = [(g.get("key"), g.get("keyboard"), g.get("mouse"), g.get("controller")) for g in guests]
+        if sig != self._guest_sig and (self.rpw_wanted() or not self.agent):
+            self._guest_sig = sig
+            self.panel.set_players([{"name": g.get("name") or _("Gast"), "key": g.get("key"),
+                                     "device": _("Gast-Link") if g.get("steamid") == "0" else "",
+                                     "keyboard": g.get("keyboard", True), "mouse": g.get("mouse", True),
+                                     "controller": g.get("controller", True)} for g in guests])
+        if st.get("link") and st.get("link") != self.panel.link_edit.text():
+            self.panel.show_link(st["link"])
+        if self.rpw.game and (self.rpw_wanted() or not self.agent):
+            self.panel.set_invites_enabled(True)
+        elif not self.rpw.game and not self.steam_game and not self.agent \
+                and not (self.host_game and self.host_game.running):
+            self.panel.set_now(None)
+        self._refresh_status()
+
+    def _rpw_friends(self, friends: list):
+        if self.agent and not self.rpw_wanted():
+            return
+        from types import SimpleNamespace
+        names = {"online": N_("Online"), "away": N_("Abwesend"), "snooze": N_("Schlummern"),
+                 "busy": N_("Beschäftigt"), "trade": N_("Will handeln"), "play": N_("Will spielen"),
+                 "offline": N_("Offline")}
+        out = []
+        for f in friends:
+            state = f.get("state", "offline")
+            text = _(names.get(state, state))
+            if f.get("game"):
+                text = _('spielt {game}').format(game=f["game"])
+            out.append(SimpleNamespace(steamid=int(f["steamid"]), name=f.get("name", "?"),
+                                       state_text=text, online=state != "offline",
+                                       playing_appid=1 if f.get("game") else 0))
+        out.sort(key=lambda f: (not f.online, f.playing_appid == 0, f.name.lower()))
+        if self.panel.set_friends(out):
+            cache = self.steam.root / "config" / "avatarcache" if self.steam.root else None
+            for sid, row in self.panel.rows.items():
+                pic = cache / f"{sid}.png" if cache else None
+                if pic and pic.exists():
+                    from PySide6.QtGui import QPixmap
+                    pm = QPixmap(str(pic))
+                    if not pm.isNull():
+                        row.set_avatar(circle(pm, 36))
+
+    def _rpw_invite(self, m: dict):
+        sid = int(m.get("steamid") or 0)
+        if m.get("result") == "ok":
+            if sid == 0 or m.get("guest") and m.get("url") and self._guest_requested:
+                url = m.get("url", "")
+                if url:
+                    self.panel.show_link(url)
+                    QApplication.clipboard().setText(url)
+                    self.toast(_('Gast-Link erstellt und kopiert ✓'), "ok")
+                self._guest_requested = 0.0
+            if sid:
+                row = self.panel.rows.get(sid)
+                self.toast(_('Einladung an {v0} gesendet ✓').format(v0=row.name if row else _('Freund')), "ok")
+        else:
+            self._guest_requested = 0.0
+            self.toast(_('Steam hat die Einladung abgelehnt: {msg}').format(msg=m.get("message", "")), "err")
+
+    def _remove_guest(self, key: str):
+        if QMessageBox.question(self, _('Gast entfernen'), _('Diesen Gast trennen?')) == QMessageBox.Yes:
+            self.rpw.remove_guest(key)
+
+    def _launch_via_steam(self, g: Game):
+        if self.game_is_running():
+            r = QMessageBox.question(self, _('Spiel läuft'),
+                                     _('»{v0}« läuft noch.\nBeenden und »{name}« starten?').format(v0=self.running_name(), name=g.name))
+            if r != QMessageBox.Yes:
                 return
+            self.stop_game()
+        if self.donor_mode:
+            self.stop_session()
+        if not self.rpw.running:
+            self.start_rpw()
+        try:
+            self.steam.run_app(g.steam_appid)
+        except Exception as e:
+            self.toast(str(e), "err")
+            return
+        log.info(_('Starte %s (%s) direkt über Steam – Remote Play über Remote Play Whatever'), g.name, g.steam_appid)
+        self.steam_game = {"gid": g.id, "appid": int(g.steam_appid), "name": g.name, "started": time.time()}
+        self._steam_game_alive = time.time()
+        self.cfg.touch(g)
+        self.library.set_running(g.id)
+        self._now_summary = _('Von Steam gestartet (AppID {appid}) – Gäste sehen dieses Spiel.').format(appid=g.steam_appid)
+        self.panel.set_now(g.name, self._now_summary)
+        self._launched_at = time.time()
+        self.toast(_('Steam startet »{name}« – lade dann Freunde ein.').format(name=g.name), "ok")
+
+    def launch(self, g: Game):
+        if self.via_steam(g):
+            self._launch_via_steam(g)
+            return
+        if not self.donor_mode:
+            if not self.donor_target():
+                self._missing_target()
+                return
+            if self.steam_game:
+                if QMessageBox.question(self, _('Spiel läuft'), _('»{v0}« läuft noch.\nBeenden und »{name}« starten?').format(
+                        v0=self.steam_game["name"], name=g.name)) != QMessageBox.Yes:
+                    return
+                self.stop_game()
+                self.steam_game = None
             cfgmod.write_pending(g.id)
-            self.start_donor(handover_msg=_('»{name}« wird über {donor_name} gestartet …').format(name=g.name, donor_name=self.cfg.donor_name))
+            self.start_donor(handover_msg=_('»{name}« wird über {donor_name} gestartet …').format(name=g.name, donor_name=self.donor_target()[1]))
             return
 
         if self.game_is_running():
@@ -475,40 +635,78 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(8000, self.open_overlay)
 
     def game_is_running(self) -> bool:
+        if self.steam_game and self._steam_game_alive and time.time() - self._steam_game_alive < 5:
+            return True
         if self.host_game and self.host_game.running:
             return True
         st = self.agent
         return bool(st and st.get("running"))
 
     def running_name(self) -> str:
+        if self.steam_game and self.game_is_running():
+            return self.steam_game["name"]
         if self.host_game and self.host_game.running:
             return self.host_game.game.name
         st = self.agent
         return (st.get("running") or {}).get("name", "") if st else ""
 
     def stop_game(self):
+        if self.steam_game:
+            import threading
+            appid = self.steam_game["appid"]
+            log.info(_('Beende %s (AppID %s)'), self.steam_game["name"], appid)
+            threading.Thread(target=self.steam.stop_app, args=(appid,), daemon=True).start()
         if self.host_game and self.host_game.running:
             self.host_game.stop()
         if self.agent:
             self.link.send("stop_game")
 
+    def donor_target(self) -> tuple[str, str] | None:
+        """(steam:// URL, name) that makes Steam start the agent: RPT Anywhere's own
+        non-Steam shortcut, or – with Remote Play Whatever switched off – the donor game."""
+        if self.cfg.use_rpw:
+            sc = self.steam.own_shortcut() if self.steam.ok else None
+            if sc:
+                return f"steam://rungameid/{self.steam.shortcut_gameid(sc.appid)}", sc.name
+            return None
+        if self.cfg.donor_appid:
+            return f"steam://rungameid/{self.cfg.donor_appid}", self.cfg.donor_name
+        return None
+
+    def _missing_target(self):
+        self.go(1)
+        self.toast(_('Lege zuerst unter »Einrichtung« die Steam-Verknüpfung »RPT Anywhere« an.') if self.cfg.use_rpw
+                   else _('Wähle zuerst ein Donor-Spiel.'), "warn")
+
+    def share_screen(self):
+        """Like RPW's "Share my screen": Steam runs the RPT Anywhere shortcut without a
+        game, so Remote Play Together shares the whole screen."""
+        if self.steam_game:
+            self.stop_game()
+            self.steam_game = None
+        if self.donor_mode:
+            self.toast(_('Bildschirm wird geteilt – starte dein Spiel ganz normal.'), "info")
+            return
+        self.start_donor(handover_msg=_('Steam startet die Bildschirmfreigabe …'))
+
     def start_donor(self, handover_msg: str = ""):
-        if not self.cfg.donor_appid:
-            self.go(1)
-            self.toast(_('Wähle zuerst ein Donor-Spiel.'), "warn")
+        target = self.donor_target()
+        if not target:
+            self._missing_target()
             return
         if self.donor_mode:
             self.toast(_('Läuft bereits über Steam.'), "info")
             return
-        log.info(_('Starte Donor %s (%s) über Steam'), self.cfg.donor_name, self.cfg.donor_appid)
+        url, name = target
+        log.info(_('Starte %s über Steam (%s)'), name, url)
         try:
-            self.steam.run_app(self.cfg.donor_appid)
+            self.steam.open_url(url)
         except Exception as e:
             self.toast(str(e), "err")
             return
-        self.toast(handover_msg or _('Steam startet {donor_name} …').format(donor_name=self.cfg.donor_name), "info")
+        self.toast(handover_msg or _('Steam startet {donor_name} …').format(donor_name=name), "info")
         self._waiting_since = time.time()
-        self.panel.set_status(_('Warte auf Steam …'), _('Steam startet »{donor_name}«. Bei Proton-Spielen kann das beim ersten Mal etwas dauern.').format(donor_name=self.cfg.donor_name),
+        self.panel.set_status(_('Warte auf Steam …'), _('Steam startet »{donor_name}«. Bei Proton-Spielen kann das beim ersten Mal etwas dauern.').format(donor_name=name),
                               S.INFO, False)
 
     def _wait_timeout(self):
@@ -517,7 +715,8 @@ class MainWindow(QMainWindow):
         self._refresh_status()
         stub = self.link.stub_log().strip()
         if not stub:
-            msg = (_('Steam hat RPT Anywhere nicht gestartet – die Startoption beim Donor fehlt oder Steam hat sie noch nicht übernommen (Steam einmal neu starten).'))
+            msg = (_('Steam hat die Verknüpfung »RPT Anywhere« nicht gestartet. Läuft Steam? Wurde die Verknüpfung gerade erst angelegt, Steam einmal neu starten.') if self.rpw_wanted()
+                   else _('Steam hat RPT Anywhere nicht gestartet – die Startoption beim Donor fehlt oder Steam hat sie noch nicht übernommen (Steam einmal neu starten).'))
         else:
             msg = (_('Der Donor-Platzhalter lief, hat sich aber wieder beendet:\n\n{v0}\n\nDetails im Reiter »Logs«.').format(v0=stub.splitlines()[-1]))
         QMessageBox.warning(self, _('Donor nicht verbunden'), msg)
@@ -548,6 +747,22 @@ class MainWindow(QMainWindow):
         self._waiting_since = 0.0
         self.toast(_('Notaus: {v0} Prozess(e) beendet.').format(v0=len(killed)) if killed
                    else _('Notaus: Es lief nichts mehr.'), "ok")
+
+    def end_all(self):
+        """End the Remote Play session and the shortcut/donor session (stops its game)."""
+        if self.rpw.is_ready:
+            self.rpw.end_session()
+            self._guest_sig = None
+            self.panel.set_players([])
+            self.panel.link_row.hide()
+        self.stop_session()
+
+    def end_rpw_session(self):
+        self.rpw.end_session()
+        self._guest_sig = None
+        self.panel.set_players([])
+        self.panel.link_row.hide()
+        self.toast(_('Remote-Play-Session beendet.'), "info")
 
     def stop_session(self):
         if self.agent:
@@ -580,7 +795,11 @@ class MainWindow(QMainWindow):
             self.donor_mode = mode
             self.donor_id = (st or {}).get("appid") or self.link.appid
             self._waiting_since = 0.0
-            if mode == "agent":
+            if mode == "agent" and self.rpw_wanted():
+                log.info(_('Agent %s über die Steam-Verknüpfung verbunden (Container=%s)'),
+                         st.get("version"), st.get("container"))
+                self._seen_events = {e["id"] for e in st.get("events", [])}
+            elif mode == "agent":
                 log.info(_('Donor-Agent %s verbunden: AppID %s, Container=%s, Steam-API=%s %s'),
                          st.get("version"), self.donor_id, st.get("container"),
                          "ok" if st.get("steam_ok") else "NEIN", st.get("steam_error", ""))
@@ -590,7 +809,9 @@ class MainWindow(QMainWindow):
                     self.toast(_('Achtung: Donor-Agent hat Version {v0}, App {version__}. Steam/Donor neu starten.').format(v0=st.get('version'), version__=__version__), "warn")
             else:
                 log.warning(_('Donor ohne Agent verbunden (Notbetrieb, kein python3 im Steam-Prozess?) – Spiele starten auf dem Host'))
-            if st and st.get("steam_ok"):
+            if self.rpw_wanted():
+                pass                         # invites go through Remote Play Whatever
+            elif st and st.get("steam_ok"):
                 self.panel.set_invites_enabled(True)
             elif st:
                 self.panel.set_invites_enabled(False, _('Steam-API im Donor nicht verfügbar: {v0}\nEinladen geht über Shift+Tab im Spiel.').format(v0=st.get('steam_error')))
@@ -603,19 +824,33 @@ class MainWindow(QMainWindow):
                 self.toast(_('Mit Steam verbunden – Remote Play Together ist bereit ✓'), "ok")
                 self._launch_pending()
         elif not mode and self.donor_mode:
-            log.info(_('Donor-Session beendet'))
+            log.info(_('Agent-Session beendet') if self.rpw_wanted() else _('Donor-Session beendet'))
             self.donor_mode = None
             self.donor_id = 0
-            self.panel.set_players([])
-            self.panel.set_invites_enabled(False, _('Session beendet. Klick auf ein Spiel, um eine neue zu starten.'))
+            if not self.rpw_wanted():
+                self.panel.set_players([])
+                self.panel.set_invites_enabled(False, _('Session beendet. Klick auf ein Spiel, um eine neue zu starten.'))
             self._refresh_status()
         elif self._waiting_since and time.time() - self._waiting_since > 90:
             self._wait_timeout()
         if st:
             self._apply_agent_state(st)
 
+    def _apply_agent_events(self, st: dict):
+        """With Remote Play Whatever, only the agent's warnings/errors matter."""
+        for e in st.get("events", []):
+            if e["id"] in self._seen_events:
+                continue
+            self._seen_events.add(e["id"])
+            if e["kind"] in ("warn", "error"):
+                log.warning("%s", e["text"])
+                self.toast(e["text"], "warn" if e["kind"] == "warn" else "err")
+
     def _apply_agent_state(self, st: dict):
         from types import SimpleNamespace
+        if self.rpw_wanted():
+            self._apply_agent_events(st)
+            return
         friends = [SimpleNamespace(steamid=int(f["steamid"]), name=f["name"],
                                    state_text=f["state_text"], online=f["online"],
                                    playing_appid=f["playing"]) for f in st.get("friends", [])]
@@ -663,6 +898,14 @@ class MainWindow(QMainWindow):
 
     def _tick(self):
         self._poll_donor()
+        if self.steam_game:
+            appid = self.steam_game["appid"]
+            if self.rpw.game_appid == appid or self.steam.app_processes(appid):
+                self._steam_game_alive = time.time()
+            elif time.time() - self.steam_game["started"] > 90 and not self._steam_game_alive:
+                self.steam_game = None          # Steam never started it
+            elif self._steam_game_alive and time.time() - self._steam_game_alive >= 5:
+                self.steam_game = None
         running = self.game_is_running()
         if self._was_running and not running and time.time() - self._launched_at > 3:
             name = self._last_name
@@ -673,7 +916,8 @@ class MainWindow(QMainWindow):
         if running:
             self._last_name = self.running_name()
             r = (self.agent or {}).get("running") or {}
-            started = r.get("started") or (self.host_game.started if self.host_game else 0)
+            started = r.get("started") or (self.steam_game or {}).get("started") \
+                or (self.host_game.started if self.host_game and self.host_game.running else 0)
             if started:
                 dur = int(time.time() - started)
                 cur = getattr(self, "_now_summary", "")
@@ -683,6 +927,16 @@ class MainWindow(QMainWindow):
 
     # ================================================================ invites
     def invite_friend(self, steamid: int):
+        if self.rpw.is_ready:
+            if not self.rpw.game:
+                self.toast(_('Starte zuerst ein Spiel – Remote Play braucht ein laufendes Steam-Spiel.'), "warn")
+                return
+            self.rpw.invite_friend(steamid)
+            row = self.panel.rows.get(steamid)
+            if row:
+                row.mark_invited()
+            log.info(_('Einladung an %s angefordert'), steamid)
+            return
         if not self.agent:
             return
         if not self.game_is_running():
@@ -694,6 +948,15 @@ class MainWindow(QMainWindow):
         log.info(_('Einladung an %s angefordert'), steamid)
 
     def guest_link(self):
+        if self.rpw.is_ready:
+            if not self.rpw.game:
+                self.toast(_('Starte zuerst ein Spiel – Remote Play braucht ein laufendes Steam-Spiel.'), "warn")
+                return
+            self._guest_requested = time.time()
+            self.rpw.request_link()
+            log.info(_('Gast-Link angefordert'))
+            self.toast(_('Gast-Link wird erstellt …'), "info")
+            return
         if not self.agent:
             return
         if not self.game_is_running():
@@ -705,6 +968,9 @@ class MainWindow(QMainWindow):
         self.toast(_('Gast-Link wird erstellt …'), "info")
 
     def open_overlay(self):
+        if self.rpw.is_ready:
+            self.steam.open_url("steam://open/friends")
+            return
         if self.agent:
             self.link.send("overlay")
 
@@ -722,6 +988,50 @@ class MainWindow(QMainWindow):
             self.user_label.setText(_('Steam-Konto: {v0}').format(v0=u['persona']) if u["persona"] else "")
         if self._waiting_since and not self.donor_mode:
             return
+
+        def button(slot):
+            try:
+                self.panel.donor_btn.clicked.disconnect()
+            except RuntimeError:
+                pass
+            self.panel.donor_btn.clicked.connect(slot)
+
+        if self.rpw_wanted():
+            sc = self.steam.own_shortcut() if self.steam.ok else None
+            self.donor_title.setText(_('STEAM-VERKNÜPFUNG'))
+            self.donor_label.setText(sc.name if sc else _('fehlt – siehe Einrichtung'))
+            self.donor_dot.set_color(S.OK if self.donor_mode else (S.WARN if sc else S.ERR))
+            g = self.rpw.game
+            guests = len((self.rpw.state or {}).get("guests") or [])
+            who = (_('Noch niemand verbunden.') if not guests else
+                   _('1 Gast verbunden.') if guests == 1 else _('{n} Gäste verbunden.').format(n=guests))
+            if not self.rpw.is_ready:
+                err = self.rpw.last_error
+                self.panel.set_status(_('Verbinde mit Steam …'),
+                                      (_('Remote Play Whatever: {err}').format(err=err) if err
+                                       else _('Remote Play Whatever startet. Steam muss laufen und angemeldet sein.')),
+                                      S.WARN if not err else S.ERR, bool(err), _('Zur Einrichtung'))
+                button(lambda: self.go(1))
+            elif self.donor_mode:
+                running = self.running_name() if self.game_is_running() else ""
+                text = (_('Steam streamt »{name}« über die Verknüpfung »RPT Anywhere«. Spiele kannst du wechseln, ohne dass jemand rausfliegt.').format(name=running) if running
+                        else _('Dein ganzer Bildschirm wird geteilt. Starte dein Spiel ganz normal oder klick eins in der Bibliothek an.'))
+                self.panel.set_status(_('Host aktiv'), text + " " + who, S.OK, True, _('Session beenden'))
+                button(self.end_all)
+                self.panel.set_invites_enabled(True)
+            elif g:
+                self.panel.set_status(_('Host aktiv'), _('Steam streamt »{name}« unter seiner eigenen AppID.').format(name=g.get("name", "?")) + " " + who,
+                                      S.OK, True, _('Session beenden'))
+                button(self.end_rpw_session)
+                if not self.steam_game and g.get("name"):
+                    self.panel.set_now(g.get("name"), _('Von Steam gestartet – Gäste sehen dieses Spiel.'))
+            else:
+                self.panel.set_status(_('Bereit'), _('Klick auf ein Spiel. Steam-Spiele startet Steam selbst, alle anderen laufen über die Verknüpfung »RPT Anywhere«. Für Spiele aus anderen Launchern: Bildschirm teilen.'),
+                                      S.OK, True, _('🖥  Bildschirm teilen') if sc else _('Zur Einrichtung'))
+                button(self.share_screen if sc else (lambda: self.go(1)))
+                self.panel.set_invites_enabled(True, _('Einladen geht, sobald ein Spiel läuft.'))
+            return
+        self.donor_title.setText(_('DONOR-SPIEL'))
         if self.donor_mode:
             name = cfg.donor_name if self.donor_id == cfg.donor_appid else f"AppID {self.donor_id}"
             if self.donor_mode == "agent":
@@ -752,7 +1062,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         if getattr(self, "_restarting", False):
-            super().closeEvent(e)      # restart: keep the donor session and the game alive
+            self.rpw.stop()            # restart: keep the session, the donor and the game alive
+            super().closeEvent(e)
             return
         if self.game_is_running():
             r = QMessageBox.question(self, _('Beenden?'), _('»{v0}« läuft noch.\nSpiel und Remote-Play-Session ebenfalls beenden?\n\n(Nein = Spiel läuft weiter, Session endet mit dem Spiel)').format(v0=self.running_name()),
@@ -761,10 +1072,21 @@ class MainWindow(QMainWindow):
                 e.ignore()
                 return
             if r == QMessageBox.Yes:
+                if self.steam_game:
+                    QApplication.setOverrideCursor(Qt.WaitCursor)
+                    try:
+                        self.steam.stop_app(self.steam_game["appid"])
+                    finally:
+                        QApplication.restoreOverrideCursor()
+                    self.steam_game = None
                 self.stop_game()
-                self.stop_session()
+                if self.rpw.running:
+                    self.rpw.end_session()
+                if self.donor_mode:
+                    self.stop_session()
         elif self.donor_mode:
             self.stop_session()
+        self.rpw.stop()                # without "end": Steam keeps a running session
         super().closeEvent(e)
 
 

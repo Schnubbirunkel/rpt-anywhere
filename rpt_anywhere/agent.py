@@ -173,7 +173,7 @@ class Agent:
                 log(_("Bessere libsteam_api.so gefunden: {new} (statt {old})").format(new=libs[0], old=lib))
             lib = str(libs[0])
         if not lib:
-            self.steam_error = _('Keine libsteam_api.so gefunden (Einrichtung ③).')
+            self.steam_error = _('Keine libsteam_api.so gefunden (Einrichtung B3).')
             log(self.steam_error)
             return
         sw = Steamworks(lib)

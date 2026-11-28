@@ -6,7 +6,7 @@
 
 **Steam Remote Play Together for _any_ game on Linux**
 
-Steam games without Remote Play Together support, Windows games from GOG/Epic/itch.io via Proton, native Linux games, emulators or any command – stream them to your friends with Steam's Remote Play Together, invite them with one click or send a guest link.
+Steam games without Remote Play Together support – even with DRM, mods or their own Steam sign-in – plus Windows games from GOG/Epic/itch.io via Proton, native Linux games, emulators or any command: stream them to your friends with Steam's Remote Play Together, invite them with one click or send a guest link.
 
 [![Release](https://img.shields.io/github/v/release/Schnubbirunkel/rpt-anywhere)](https://github.com/Schnubbirunkel/rpt-anywhere/releases/latest)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
@@ -20,27 +20,34 @@ Steam games without Remote Play Together support, Windows games from GOG/Epic/it
 
 ## Features
 
-- **Any game** – Steam library, Windows games via Proton (incl. GE-Proton), Wine, native Linux programs, AppImages, emulators or any shell command
-- **One-click invites** – friends list with avatars and online status, guest links for people without a Steam account (copied to the clipboard automatically), list of connected players
-- **Switch games without kicking anyone** – the Remote Play session stays open when a game ends; just start the next one
+- **Every Steam game** – Steam starts the game itself (DRM, mods, launch options all work); [Remote Play Whatever](https://github.com/Casual-Gamer8001/RemotePlayWhatever) opens the Remote Play Together session for it in the background, even if the game doesn't support it
+- **Games outside Steam** – Windows games via Proton (incl. GE-Proton), Wine, native Linux programs, AppImages, emulators or any shell command, started by Steam through RPT Anywhere's own non-Steam shortcut – no donor game
+- **Share my screen** – for games Steam can't start (other launchers): Steam shares your whole screen
+- **One-click invites** – friends list with online status, guest links for people without a Steam account (copied to the clipboard automatically), connected players with per-guest keyboard/mouse/controller switches and a remove button
 - **Nice library** – cover art, favorites, search and filters, drag & drop to add games, import of your non-Steam shortcuts from Steam
-- **Guided setup** – shows which installed games support Remote Play Together and are suitable as donor, sets the launch option for you (only that one line, with backup)
+- **Guided setup** – downloads and updates Remote Play Whatever for you and creates the Steam shortcut (your other shortcuts stay untouched, with backup)
 - **Live logs** in the app, an **emergency stop** and a **diagnostics** command for troubleshooting
 - **English and German** interface (switchable in the settings, more languages welcome)
-- Uses only **official interfaces**: Steam's launch options and the public Steamworks API – no patching or hooking of the Steam client
 
 ## How it works
 
-Steam only allows Remote Play Together for games it started itself and that support it. RPT Anywhere uses the **donor** principle (like [RemotePlayDetached](https://github.com/smaTc/RemotePlayDetached) and [cooplauncher](https://github.com/MBaliver/cooplauncher)):
+Steam only offers Remote Play Together for games it started itself and that support it. RPT Anywhere has two ways around that:
 
-1. You pick an installed Steam game **with** Remote Play Together support as the *donor* and set its launch option to RPT Anywhere.
-2. When Steam starts the donor, it starts the RPT Anywhere **agent** instead. The agent only needs the Python standard library, so it also runs inside Steam's runtime container (always the case for Proton games).
-3. The app tells the agent what to start. The agent launches your game **as a real child of Steam** with Steam's own environment (overlay, AppID, Steam Input), so Steam streams it as the donor game. Invites, guest links and the friends list also go through the agent, using the official `ISteamRemotePlay` API.
+**Steam games – Steam + Remote Play Whatever (default).** The app lets Steam start the game normally (`steam://rungameid/…`), so DRM, launch options and mods behave exactly as usual. It then drives [Remote Play Whatever](https://github.com/Casual-Gamer8001/RemotePlayWhatever) (RPW, MIT) in its window-less `--serve` mode. RPW talks to the running Steam client through Steam's own internal, undocumented functions (`IClientRemoteClientManager`, resolved by name so most Steam updates don't break it) and creates the Remote Play Together group, invites and guest links **for the game's own AppID**. RPT Anywhere downloads RPW on request and keeps it running in the background.
+
+**Games outside Steam and screen sharing – Steam shortcut.** Like RPW's *Play a program that isn't in Steam* and *Share my screen*, these run as a non-Steam game. RPW creates a temporary shortcut for that through Steam's internal functions, which its `--serve` mode doesn't offer; RPT Anywhere therefore adds **one permanent non-Steam shortcut "RPT Anywhere"** to Steam once (Setup, part B).
+
+1. When you click such a game, the app opens that shortcut (`steam://rungameid/…`), so Steam starts RPT Anywhere's small **agent** as a real non-Steam game, with overlay.
+2. The agent starts your game (Proton with the Steam Linux Runtime, Wine, native, command) as its child, so Steam streams it. You can switch games without anyone being kicked.
+3. Without a game, the shortcut just waits – Steam then shares your whole screen (*Share my screen*).
+
+Invites, guest links and guest controls go through RPW in both cases.
 
 ```
- RPT Anywhere app (GUI) ──requests──▶ agent (in Steam's donor process) ──starts──▶ your game
-          ▲                                   │                                   │
-          └──────── status, friends, guests ◀─┘          Steam overlay + stream ◀─┘
+ Steam game:    RPT Anywhere ──steam://rungameid/<AppID>──▶ Steam ──▶ game (own AppID)
+ Other game:    RPT Anywhere ──steam://rungameid/<shortcut>──▶ Steam ──▶ agent ──▶ your game
+ Share screen:  RPT Anywhere ──steam://rungameid/<shortcut>──▶ Steam ──▶ agent (waits) → whole screen
+                RPT Anywhere ──--serve──▶ Remote Play Whatever ──▶ Steam: RPT group, invites, guest links
 ```
 
 ## Installation
@@ -63,36 +70,34 @@ From source: `git clone https://github.com/Schnubbirunkel/rpt-anywhere && cd rpt
 
 Open RPT Anywhere → **Setup**:
 
-1. **Choose a donor.** Games marked **RPT ✓** support Remote Play Together according to the Steam store. Ideally pick a small game you don't otherwise play – while it is the donor, it no longer starts on its own.
-2. **Set the launch option.** Either click **Set automatically** (Steam must be closed; a backup of `localconfig.vdf` is created and only this one line is changed) or paste this into Steam → right-click the donor → *Properties → Launch Options*:
-   ```
-   "/home/YOU/.local/bin/rpt-anywhere" --donor # %command%
-   ```
-   Restart Steam once afterwards so it definitely picks up the option.
-3. **libsteam_api.so** (for invites from the app) is searched for in your installed games automatically. Without it you invite friends as usual via the Steam overlay (Shift+Tab).
+**A · Remote Play Whatever (Steam games).** Click **Download** – the app fetches the Linux AppImage from the [RPW releases](https://github.com/Casual-Gamer8001/RemotePlayWhatever/releases) into `~/.local/share/rpt-anywhere/` and starts it in the background. An AppImage you downloaded yourself (e.g. in `~/Applications` or `~/Downloads`) is found automatically, or pick it with **Choose file**. After a Steam update breaks it, click **Update**.
+
+**B · Steam shortcut (games outside Steam, screen sharing).** Click **Create shortcut in Steam**. Steam is closed briefly, the shortcut "RPT Anywhere" is appended to your `shortcuts.vdf` (your other shortcuts stay byte for byte, a backup is written first) and Steam is started again.
 
 ![Setup page](docs/screenshots/02-setup.png)
 
 ## Usage
 
+- **Click a Steam game:** Steam starts it; as soon as it runs you can invite. The session belongs to that game, so Steam shows it in your friends' list as usual.
+- **Click another game:** Steam starts the "RPT Anywhere" shortcut, which starts your game. Switching games keeps everyone connected.
+- **Share my screen** (right panel, when nothing runs): for games from other launchers – start the game however you like, guests see your screen.
+- **Invite** in the right panel: invite friends directly or **create a guest link**. Connected players are listed under *Players*; for Steam games you can switch keyboard, mouse and controller per guest or remove a guest.
 - **Add games:** **＋ Add game**, drag & drop a file onto the window, or **Import Steam shortcuts**. Runners: *Native Linux*, *Proton* (own prefix per game, Steam Linux Runtime like Steam itself), *Wine*, *Command / script*. Installed Steam games appear automatically.
-- **Click a game:** if the app isn't connected to Steam yet, it lets Steam start the donor, connects to the agent and then starts your game.
-- **Invite** in the right panel: invite friends directly or **create a guest link**. Connected players are listed under *Players*.
 - **Right-click a game:** edit, favorite, open folder, show log, hide.
-- **Language:** Settings → *Language / Sprache* (English is the default).
+- **Language:** Settings → *Language / Sprache* (English is the default). With Remote Play Whatever switched off in the settings, everything runs through a donor game as in earlier versions.
 
 ![Edit dialog](docs/screenshots/05-edit-game.png)
 
 ### Command line
 
 ```
-rpt-anywhere --run "Name or ID"      # start a game (via Steam/donor if needed)
+rpt-anywhere --run "Name or ID"      # start a game (Steam games directly, others through the shortcut)
 rpt-anywhere --run 413150            # Steam game by AppID
 rpt-anywhere --list                  # list your own games
-rpt-anywhere --diagnose              # check Steam detection: libraries, executables, Proton, donor
+rpt-anywhere --diagnose              # check Steam detection: libraries, executables, Proton
 rpt-anywhere --reset                 # emergency stop: end session, agent and last game
 rpt-anywhere --repair-steam-config   # restore localconfig.vdf from RPT Anywhere's first backup
-rpt-anywhere --print-launch-option   # print the donor launch option
+rpt-anywhere --guest-link APPID      # guest link via the public API for a game Steam started (RPT-enabled games only)
 ```
 
 The command line follows the language set in the app; `RPTA_LANG=de` selects it directly.
@@ -102,7 +107,7 @@ The command line follows the language set in the app; `RPTA_LANG=de` selects it 
 | | |
 |---|---|
 | ![Settings](docs/screenshots/03-settings.png) | ![Live logs](docs/screenshots/04-logs.png) |
-| Settings with language selection and emergency stop | Live logs of the app, the donor placeholder and every game |
+| Settings with language selection and emergency stop | Live logs of the app, the agent and every game |
 
 German interface:
 
@@ -110,17 +115,19 @@ German interface:
 
 ## Troubleshooting
 
-- **Nothing happens when the donor starts / "Donor not connected":** restart Steam once after setting the launch option. The *Logs* tab → *Donor placeholder* shows what Steam actually started (version, container yes/no).
-- **Steam keeps showing the donor as running:** a process of the last session is still alive. Use the emergency stop (Settings or Logs tab) or `rpt-anywhere --reset`.
-- **Executable not found:** `rpt-anywhere --diagnose` shows which file was detected for each game. Steam's launch configuration is read from its app cache (`appinfo.vdf` and the newer split `appcache/appinfo/appinfo_XX.vdf` format); otherwise the app searches the game folder. You can always set the executable in the edit dialog.
-- **Overlay missing in a game:** programs that are not visible inside Steam's container (e.g. `/usr/bin/…`, Wine) are started directly on the host, where the overlay may be missing – the app tells you when that's the case. Flatpak/Snap apps run in their own sandbox.
-- **Guest's mouse feels laggy:** input is transported by Steam itself, not by RPT Anywhere; the stream statistics usually point to network latency. A wired connection or a gamepad for the guest helps most.
+- **"Remote Play Whatever does not match this Steam version" / invites fail after a Steam update:** Setup → **Update** fetches the newest RPW. RPW targets the **stable** Steam client; with the Steam beta things may break first. `rpt-anywhere --diagnose` shows which branch you are on.
+- **Guest sees "Please wait" or "Host is busy":** Steam only shows guests the game while it is in front on your PC, and pauses guest input while Steam's overlay is open. Click the game / close the overlay with Shift+Tab.
+- **Nothing happens after clicking a non-Steam game:** restart Steam once after creating the shortcut. The *Logs* tab → *Agent (started by Steam)* shows what Steam actually started.
+- **Steam keeps showing "RPT Anywhere" as running:** a process of the last session is still alive. Use the emergency stop (Settings or Logs tab) or `rpt-anywhere --reset`.
+- **Executable not found:** `rpt-anywhere --diagnose` shows which file was detected for each game. You can always set the executable in the edit dialog.
+- **Guest's mouse feels laggy:** input is transported by Steam itself; the stream statistics usually point to network latency. A wired connection or a gamepad for the guest helps most.
 
 ## Limitations
 
 - The game needs **local multiplayer** – guests appear as (virtual) controllers or keyboard/mouse, just like with regular Remote Play Together.
-- **Anti-cheat and DRM launchers** (EA app, Ubisoft Connect, some Steam games) may refuse to start this way. For Steam games, *Run with the game's own Steam AppID* in the edit dialog sometimes helps.
-- **Flatpak Steam** runs everything inside its sandbox; the native Steam package of your distribution is the most reliable choice.
+- **Remote Play Whatever uses Steam's internal functions.** A Steam update can break it until RPW is updated; RPW needs glibc 2.35+ and X11/XWayland.
+- **Flatpak Steam** keeps its files in a sandbox; RPW and the shortcut work best with the native Steam package of your distribution.
+- **Anti-cheat and DRM launchers** (EA app, Ubisoft Connect) may still refuse to run guests' input or the game outside their launcher.
 
 ## Adding a language
 
@@ -130,7 +137,7 @@ German interface:
 
 ## Credits
 
-Inspired by [RemotePlayDetached](https://github.com/smaTc/RemotePlayDetached), [cooplauncher](https://github.com/MBaliver/cooplauncher) and [RemotePlayWhatever](https://github.com/m4dEngi/RemotePlayWhatever). The appinfo format documentation of [SteamAppInfo](https://github.com/ValveResourceFormat/SteamAppInfo) was very helpful.
+Steam games run through [Remote Play Whatever](https://github.com/Casual-Gamer8001/RemotePlayWhatever) by Casual-Gamer8001 (fork of [m4dEngi's RemotePlayWhatever](https://github.com/m4dEngi/RemotePlayWhatever), MIT), which RPT Anywhere downloads and drives but does not bundle. The agent that starts games inside a Steam-launched process is inspired by [RemotePlayDetached](https://github.com/smaTc/RemotePlayDetached) and [cooplauncher](https://github.com/MBaliver/cooplauncher). The appinfo format documentation of [SteamAppInfo](https://github.com/ValveResourceFormat/SteamAppInfo) was very helpful.
 
 ## License
 

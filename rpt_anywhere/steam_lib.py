@@ -404,6 +404,77 @@ class Steam:
                                 iget(s, "LaunchOptions", ""), iget(s, "icon", "")))
         return out
 
+    # ---------------------------------------------------------------- own shortcut
+    SHORTCUT_NAME = "RPT Anywhere"
+    SHORTCUT_ARG = "--donor"
+
+    def own_shortcut(self) -> Shortcut | None:
+        """The non-Steam shortcut through which Steam starts RPT Anywhere's agent
+        (external games and screen sharing run inside it)."""
+        for sc in self.shortcuts():
+            if "rpt-anywhere" in sc.exe and self.SHORTCUT_ARG in (sc.launch_options or ""):
+                return sc
+        return None
+
+    @staticmethod
+    def shortcut_gameid(appid: int) -> int:
+        """64-bit game ID for steam://rungameid/ of a non-Steam shortcut."""
+        return ((appid & 0xFFFFFFFF) << 32) | 0x02000000
+
+    def add_own_shortcut(self, exe: str, icon: str = "") -> int:
+        """Append the RPT Anywhere shortcut to shortcuts.vdf (Steam must not be running,
+        it would overwrite the file). Existing entries stay byte for byte; a backup is
+        written first. Returns the shortcut's AppID."""
+        import binascii
+        import struct
+        if self.is_running():
+            raise RuntimeError(_("Steam muss dafür beendet sein."))
+        ud = self.userdata()
+        if not ud:
+            raise RuntimeError(_("Kein Steam-Benutzer gefunden."))
+        f = ud / "config" / "shortcuts.vdf"
+        exe_q = f'"{exe}"'
+        appid = (binascii.crc32((exe_q + self.SHORTCUT_NAME).encode()) & 0xFFFFFFFF) | 0x80000000
+
+        def st(k, v):
+            return b"\x01" + k.encode() + b"\0" + v.encode() + b"\0"
+
+        def num(k, v):
+            return b"\x02" + k.encode() + b"\0" + struct.pack("<I", v & 0xFFFFFFFF)
+
+        body = (num("appid", appid) + st("AppName", self.SHORTCUT_NAME) + st("Exe", exe_q)
+                + st("StartDir", f'"{Path(exe).parent}"') + st("icon", icon) + st("ShortcutPath", "")
+                + st("LaunchOptions", self.SHORTCUT_ARG) + num("IsHidden", 0)
+                + num("AllowDesktopConfig", 1) + num("AllowOverlay", 1) + num("OpenVR", 0)
+                + num("Devkit", 0) + st("DevkitGameID", "") + num("DevkitOverrideAppID", 0)
+                + num("LastPlayTime", 0) + st("FlatpakAppID", "") + b"\x00tags\x00\x08")
+        if f.exists():
+            raw = f.read_bytes()
+            data, _unused = vdf.parse_binary(raw)
+            items = iget(data, "shortcuts", {}) or {}
+            for s_ in items.values():
+                if isinstance(s_, dict) and "rpt-anywhere" in str(iget(s_, "Exe", "")) \
+                        and self.SHORTCUT_ARG in str(iget(s_, "LaunchOptions", "")):
+                    return int(iget(s_, "appid", 0)) & 0xFFFFFFFF      # already there
+            idx = max([int(k) for k in items if str(k).isdigit()] + [-1]) + 1
+            if not raw.endswith(b"\x08\x08"):
+                raise RuntimeError(_("shortcuts.vdf hat ein unerwartetes Format – nichts verändert."))
+            backup = f.with_name(f"shortcuts.vdf.rpta-backup-{int(__import__('time').time())}")
+            backup.write_bytes(raw)
+            new = raw[:-2] + b"\x00" + str(idx).encode() + b"\0" + body + b"\x08" + b"\x08\x08"
+        else:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            new = b"\x00shortcuts\x00" + b"\x000\x00" + body + b"\x08" + b"\x08\x08"
+        tmp = f.with_suffix(".rpta-tmp")
+        tmp.write_bytes(new)
+        check, _unused = vdf.parse_binary(new)                  # must still parse
+        if not any(isinstance(v, dict) and (int(iget(v, "appid", 0)) & 0xFFFFFFFF) == appid
+                   for v in (iget(check, "shortcuts", {}) or {}).values()):
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError(_("Prüfung der neuen shortcuts.vdf fehlgeschlagen – nichts verändert."))
+        tmp.replace(f)
+        return appid
+
     # ---------------------------------------------------------------- launch options
     def _localconfig(self) -> Path | None:
         ud = self.userdata()
@@ -529,6 +600,54 @@ class Steam:
 
     def run_app(self, appid: int) -> None:
         self.open_url(f"steam://rungameid/{appid}")
+
+    @staticmethod
+    def app_processes(appid: int) -> list[int]:
+        """PIDs of a game Steam started: its `reaper SteamLaunch AppId=N` and all descendants."""
+        children: dict[int, list[int]] = {}
+        roots: list[int] = []
+        for d in os.listdir("/proc"):
+            if not d.isdigit():
+                continue
+            pid = int(d)
+            try:
+                with open(f"/proc/{d}/stat", "rb") as fh:
+                    st = fh.read().decode(errors="replace")
+                ppid = int(st.rsplit(")", 1)[1].split()[1])
+                with open(f"/proc/{d}/cmdline", "rb") as fh:
+                    args = fh.read().split(b"\0")
+            except (OSError, ValueError, IndexError):
+                continue
+            children.setdefault(ppid, []).append(pid)
+            if args and args[0].endswith(b"reaper") and b"SteamLaunch" in args \
+                    and f"AppId={appid}".encode() in args:
+                roots.append(pid)
+        out, todo = [], list(roots)
+        while todo:
+            p = todo.pop()
+            out.append(p)
+            todo += children.get(p, [])
+        return out
+
+    def stop_app(self, appid: int, timeout: float = 6.0) -> int:
+        """End a game Steam started (SIGTERM, then SIGKILL). Returns the number of processes."""
+        import signal
+        import time as _t
+        pids = self.app_processes(appid)
+        for p in reversed(pids):
+            try:
+                os.kill(p, signal.SIGTERM)
+            except OSError:
+                pass
+        end = _t.time() + timeout
+        while _t.time() < end and any(os.path.exists(f"/proc/{p}") for p in pids):
+            _t.sleep(0.2)
+        for p in pids:
+            try:
+                os.kill(p, signal.SIGKILL)
+            except OSError:
+                pass
+        return len(pids)
 
     # ---------------------------------------------------------------- libsteam_api
     def find_libsteam_api(self) -> list[Path]:
